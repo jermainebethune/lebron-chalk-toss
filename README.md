@@ -1,9 +1,9 @@
-# Stat Oracle
+# The Chalk Toss
 
 Ask a question about LeBron James' career in plain English. Get back real numbers.
 
-**Live:** [oracle.jermainebethune.com](https://oracle.jermainebethune.com)
-**API:** [lebron-oracle.jermaine-e7a.workers.dev](https://lebron-oracle.jermaine-e7a.workers.dev)
+**Live:** [chalk.jermainebethune.com](https://chalk.jermainebethune.com)
+**API:** [chalk-toss.jermaine-e7a.workers.dev](https://chalk-toss.jermaine-e7a.workers.dev)
 
 ```
 "When did he score 40+ against Boston?"
@@ -89,7 +89,7 @@ fails closed: if a secret isn't configured, that path is simply unavailable rath
 silently open.
 
 ```bash
-curl -X POST https://lebron-oracle.jermaine-e7a.workers.dev/api/ask \
+curl -X POST https://chalk-toss.jermaine-e7a.workers.dev/api/ask \
   -H 'content-type: application/json' \
   -H 'x-api-key: <key>' \
   -d '{"question":"What was his career high?"}'
@@ -167,6 +167,19 @@ Fixed by dropping the column and catching D1 errors, so a query against absent d
 **6. Off-by-one in an inclusive range.** "40+" generated `points > 40`, silently excluding
 19 exactly-40-point games. Caught by checking a boundary case rather than trusting an answer
 that looked right.
+
+## Photographs — attribution still needed
+
+The two photos in `public/img/` are from Wikimedia Commons (filenames matched the Commons
+naming convention), resized and re-compressed from ~900 KB down to 220 KB total.
+
+**Most LeBron photographs on Commons are CC BY-SA, which requires naming the photographer,
+linking the licence, and noting that the image was modified.** These are cropped and resized,
+so that last part applies. The site footer currently carries a placeholder credit; it needs
+the real photographer and licence before this counts as properly attributed.
+
+To fix: find each file's page on Wikimedia Commons, take the author and licence, and replace
+the `#photo-credit` line in `src/ui.js`.
 
 ## Limits worth stating
 

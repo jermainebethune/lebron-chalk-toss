@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "lebron-oracle",
+  "name": "chalk-toss",
   "main": "src/index.js",
   "compatibility_date": "2026-07-18",
   "observability": {
@@ -10,13 +10,18 @@
   // wildcard (*.jermainebethune.com -> 45.76.13.148) does not conflict: a
   // specific record always takes precedence over a wildcard.
   "routes": [
-    { "pattern": "oracle.jermainebethune.com", "custom_domain": true }
+    { "pattern": "chalk.jermainebethune.com", "custom_domain": true }
   ],
   // Keep the workers.dev URL alive alongside the custom domain. Adding a route
   // otherwise disables it, and the custom domain sits behind the zone's bot
   // protection — which challenges API clients. This stays as the unchallenged
   // path for curl and any programmatic use.
   "workers_dev": true,
+  // Photographs. Requests matching a file here are served statically; anything
+  // else falls through to the Worker, so "/" still renders the page.
+  "assets": {
+    "directory": "./public"
+  },
   "ai": {
     "binding": "AI"
   },

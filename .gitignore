@@ -2,3 +2,5 @@ node_modules/
 .wrangler/
 .dev.vars
 *.log
+# full-size source photos live outside the repo
+LeBron_James_*.jpg
