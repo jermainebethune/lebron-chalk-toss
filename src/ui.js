@@ -431,12 +431,24 @@ function showCredit(p) {
   }
 }
 
+// The hero is full-height, so anything written into #out starts below the
+// fold. Every render must bring itself into view or the page looks inert —
+// this caught out the "one moment" and error states, which appeared to do
+// nothing at all.
+function render(html) {
+  out.hidden = false;
+  out.innerHTML = html;
+  (out.firstElementChild || out).scrollIntoView({
+    behavior: reduceMotion ? 'auto' : 'smooth',
+    block: 'start'
+  });
+}
+
 async function ask(question) {
   const token = currentToken();
   if (!token) {
-    out.hidden = false;
-    out.innerHTML = '<div class="slab wait"><p class="tag">One moment</p>' +
-      '<p class="text">Complete the verification, then ask again. It usually clears on its own.</p></div>';
+    render('<div class="slab wait"><p class="tag">One moment</p>' +
+      '<p class="text">Verification is still clearing &mdash; give it a second and ask again.</p></div>');
     return;
   }
 
@@ -445,8 +457,7 @@ async function ask(question) {
   toss(r.left + r.width / 2, r.top + r.height / 2);
 
   go.disabled = true;
-  out.hidden = false;
-  out.innerHTML = '<div class="slab wait"><p class="tag">Working</p><p class="text">Writing a query&hellip;</p></div>';
+  render('<div class="slab wait"><p class="tag">Working</p><p class="text">Writing a query&hellip;</p></div>');
 
   try {
     const res = await fetch('/api/ask', {
@@ -458,9 +469,9 @@ async function ask(question) {
     resetToken();
 
     if (!res.ok) {
-      out.innerHTML = '<div class="slab error"><p class="tag">' +
+      render('<div class="slab error"><p class="tag">' +
         (data.guarded ? 'Query rejected by the guard' : 'Not this time') +
-        '</p><p class="text">' + esc(data.error || 'Request failed.') + '</p></div>';
+        '</p><p class="text">' + esc(data.error || 'Request failed.') + '</p></div>');
       return;
     }
 
@@ -475,15 +486,9 @@ async function ask(question) {
       html += '<div class="slab rows"><p class="tag">Straight from the record &mdash; every number above came from here</p>' +
         table(data.rows) + '</div>';
     }
-    out.innerHTML = html;
-    // Scroll the answer itself into view, not the container — #out carries a
-    // large vertical padding, so targeting it lands the viewport in empty space.
-    (out.firstElementChild || out).scrollIntoView({
-      behavior: reduceMotion ? 'auto' : 'smooth',
-      block: 'start'
-    });
+    render(html);
   } catch (err) {
-    out.innerHTML = '<div class="slab error"><p class="tag">Error</p><p class="text">Could not reach the server.</p></div>';
+    render('<div class="slab error"><p class="tag">Error</p><p class="text">Could not reach the server.</p></div>');
   } finally {
     go.disabled = false;
   }
