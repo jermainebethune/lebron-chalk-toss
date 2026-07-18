@@ -66,7 +66,8 @@ there is no secret in production.
 | `src/access.js` | Who may spend a Neuron — Turnstile or API key |
 | `src/guard.js` | SQL validation — the security boundary |
 | `src/prompts.js` | The two prompts and the schema shown to the model |
-| `src/ui.js` | Single-page frontend |
+| `src/ui.js` | Single-page frontend — design, chalk-burst canvas, Turnstile wiring |
+| `public/img/` | Photographs, served by the static assets binding |
 | `extract.mjs` | Regenerates `seed.sql` from the balldontlie API |
 | `test/guard.test.js` | 15 tests against the guard |
 
@@ -167,6 +168,25 @@ Fixed by dropping the column and catching D1 errors, so a query against absent d
 **6. Off-by-one in an inclusive range.** "40+" generated `points > 40`, silently excluding
 19 exactly-40-point games. Caught by checking a boundary case rather than trusting an answer
 that looked right.
+
+## The front end
+
+Named for the pre-game ritual, and the design follows from it: arena-dark ground, chalk-white
+type, and a puff of chalk thrown from the Ask button when a question goes up. That burst is the
+only motion on the page and fires on submit only, so it marks a moment rather than decorating
+one. It respects `prefers-reduced-motion`.
+
+Accent colour is Heat red because both photographs are from the Miami years — **if the photos
+are ever swapped for Cleveland or Lakers shots, the accent has to move with them.**
+
+Two things worth knowing if you edit it:
+
+- **The hero is full-height, so anything written into the results container starts below the
+  fold.** Every output state routes through one `render()` helper that writes *and* scrolls.
+  Originally only the success path scrolled, which made errors and the "verification still
+  clearing" message look like the page had done nothing at all.
+- **Scroll to the first result slab, not the container** — the container carries large vertical
+  padding, so targeting it lands the viewport in a blank gap.
 
 ## Photographs — attribution still needed
 

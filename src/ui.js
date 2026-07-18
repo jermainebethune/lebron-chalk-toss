@@ -139,6 +139,21 @@ export const page = `<!doctype html>
   button.ask:disabled { opacity: 0.45; cursor: default; }
   button.ask:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
 
+  /* Secondary action: outlined, not filled, so it never competes with Ask
+     for the eye. Hidden until there is actually something to clear. */
+  button.clear {
+    padding: 0.95rem 1.25rem; flex: none;
+    font-family: var(--display); font-size: 1.05rem; font-weight: 700;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--chalk-mid); background: transparent;
+    border: 1px solid var(--line); border-radius: 2px; cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  button.clear:hover { color: var(--chalk); border-color: var(--chalk-dim); }
+  button.clear:active { transform: translateY(1px); }
+  button.clear:focus-visible { outline: 2px solid var(--chalk); outline-offset: 2px; }
+  button.clear[hidden] { display: none; }
+
   .suggest { display: flex; flex-wrap: wrap; gap: 0.45rem; max-width: 36rem; }
   .chip {
     font-family: var(--body); font-size: 0.82rem;
@@ -278,6 +293,7 @@ export const page = `<!doctype html>
     <form id="form">
       <input type="text" id="q" placeholder="When did he score 40+ against Boston?" autocomplete="off" aria-label="Ask a question about LeBron's career" required>
       <button type="submit" class="ask" id="go">Ask</button>
+      <button type="button" class="clear" id="clear">Clear</button>
     </form>
 
     <div class="suggest">
@@ -409,7 +425,14 @@ function step() {
 const form = document.getElementById('form');
 const input = document.getElementById('q');
 const go = document.getElementById('go');
+const clearBtn = document.getElementById('clear');
 const out = document.getElementById('out');
+
+// Clear only exists when there is state to clear — an always-present button
+// that does nothing most of the time is just noise next to the primary action.
+function syncClear() {
+  clearBtn.hidden = !input.value.trim() && out.hidden;
+}
 
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -438,6 +461,7 @@ function showCredit(p) {
 function render(html) {
   out.hidden = false;
   out.innerHTML = html;
+  syncClear();
   (out.firstElementChild || out).scrollIntoView({
     behavior: reduceMotion ? 'auto' : 'smooth',
     block: 'start'
@@ -502,9 +526,24 @@ form.addEventListener('submit', (e) => {
 document.querySelectorAll('.chip').forEach(chip => {
   chip.addEventListener('click', () => {
     input.value = chip.textContent;
+    syncClear();
     ask(chip.textContent);
   });
 });
+
+input.addEventListener('input', syncClear);
+
+clearBtn.addEventListener('click', () => {
+  input.value = '';
+  out.innerHTML = '';
+  out.hidden = true;
+  syncClear();
+  input.focus();
+  // Back to the top so the page reads as reset rather than just emptied.
+  window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+});
+
+syncClear();
 
 fetch('/api/health').then(r => r.json()).then(d => showCredit(d.provenance)).catch(() => {});
 </script>
