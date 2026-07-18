@@ -150,9 +150,30 @@ that looked right.
 
 ## Cost
 
-Everything here fits the Cloudflare free tier: 100k Worker requests/day, 10k Workers AI
-Neurons/day, 5M D1 rows read/day. Two inference calls per question — one to write the SQL,
-one to describe the rows, skipped entirely when a query returns nothing.
+Everything fits the Cloudflare free tier: 100k Worker requests/day, 10k Workers AI
+Neurons/day, 5M D1 rows read/day.
+
+Measured over a day of development and testing, via the GraphQL analytics API
+(`aiInferenceAdaptiveGroups` — there is no REST endpoint for this):
+
+| Model | Role | Requests | Neurons | Per request |
+|---|---|---|---|---|
+| `qwen2.5-coder-32b` | writes the SQL | 64 | 2,127.7 | **33.2** |
+| `llama-3.2-3b` | describes the rows | 50 | 115.9 | **2.3** |
+
+**~35.5 Neurons per question → roughly 280 questions/day** within the free allowance.
+
+Two things worth reading off that table:
+
+**The SQL model is 94% of the cost.** It runs 14× more expensive per call than the
+summarizer. Switching `SQL_MODEL` to `llama-3.2-3b` would cut cost to ~4.6 Neurons/question
+(~2,100/day), but SQL quality is the single biggest source of wrong answers, so the
+expensive model earns its place. The lever exists if traffic ever justifies pulling it.
+
+**64 SQL calls but only 50 prose calls.** The other 14 questions were refused as
+unanswerable or returned zero rows, and short-circuited before the second inference. The
+early return that fixed bug #4 also eliminated 22% of inference calls — correctness and cost
+happening to point the same direction.
 
 Data from the [balldontlie API](https://balldontlie.io). Per-player box scores require a paid
 tier; the free tier serves team-level results only.
