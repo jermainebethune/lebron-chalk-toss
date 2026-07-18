@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lebron-oracle",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-18",
+  "observability": {
+    "enabled": true
+  },
+  // A Workers custom domain creates its own DNS record. The zone's existing
+  // wildcard (*.jermainebethune.com -> 45.76.13.148) does not conflict: a
+  // specific record always takes precedence over a wildcard.
+  "routes": [
+    { "pattern": "oracle.jermainebethune.com", "custom_domain": true }
+  ],
+  // Keep the workers.dev URL alive alongside the custom domain. Adding a route
+  // otherwise disables it, and the custom domain sits behind the zone's bot
+  // protection — which challenges API clients. This stays as the unchallenged
+  // path for curl and any programmatic use.
+  "workers_dev": true,
+  "ai": {
+    "binding": "AI"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lebron-oracle",
+      "database_id": "025ea190-bcfb-4cea-8aad-9c2cba42419c"
+    }
+  ]
+}

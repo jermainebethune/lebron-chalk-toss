@@ -1,0 +1,17 @@
+{
+  "name": "lebron-oracle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Natural-language questions over a basketball stats database. The model writes SQL; D1 supplies every number.",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "schema": "wrangler d1 execute lebron-oracle --remote --file=./schema.sql",
+    "seed": "wrangler d1 execute lebron-oracle --remote --file=./seed.sql",
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "wrangler": "^4.112.0"
+  }
+}

@@ -1,0 +1,158 @@
+# Stat Oracle
+
+Ask a question about LeBron James' career in plain English. Get back real numbers.
+
+**Live:** [oracle.jermainebethune.com](https://oracle.jermainebethune.com)
+**API:** [lebron-oracle.jermaine-e7a.workers.dev](https://lebron-oracle.jermaine-e7a.workers.dev)
+
+```
+"When did he score 40+ against Boston?"
+→ SELECT date, opponent, points FROM games WHERE opponent = 'BOS' AND points >= 40
+→ 9 rows from D1
+→ "He scored 40 or more against Boston on 2006-02-15, 2008-05-18, 2010-04-04, …"
+```
+
+Built on Cloudflare Workers, Workers AI, and D1. Runs on the free tier.
+
+## The idea
+
+A chatbot asked "how many points does LeBron have?" answers from training data, and can be
+confidently wrong. This never asks the model what it knows.
+
+The model has exactly two jobs:
+
+1. Turn a question into a SQL query
+2. Describe rows that were handed to it
+
+Every number a user sees came out of the database in between. The model cannot invent a
+statistic because it is never asked to recall one.
+
+```
+question → Worker → Workers AI (writes SQL) → guard (validates) → D1 (runs it)
+                                                                    ↓
+        answer ← Workers AI (describes rows) ←──────────────── real rows
+```
+
+## Running it
+
+```bash
+npm install
+npx wrangler login
+
+npm run schema     # create tables in D1
+npm run seed       # load data
+npm run deploy
+
+npm test           # guard unit tests
+```
+
+To regenerate the dataset you need a [balldontlie](https://balldontlie.io) API key with
+stats access in `~/.balldontlie_key`:
+
+```bash
+node extract.mjs > seed.sql && npm run seed
+```
+
+The key is only used by the extractor. The deployed Worker reads D1 and nothing else, so
+there is no secret in production.
+
+## Layout
+
+| File | Purpose |
+|---|---|
+| `src/index.js` | Request flow and error handling |
+| `src/guard.js` | SQL validation — the security boundary |
+| `src/prompts.js` | The two prompts and the schema shown to the model |
+| `src/ui.js` | Single-page frontend |
+| `extract.mjs` | Regenerates `seed.sql` from the balldontlie API |
+| `test/guard.test.js` | 15 tests against the guard |
+
+## The guard
+
+An LLM writing SQL against your database is a real risk. The guard is an **allowlist with a
+preprocessing pass**, not a keyword blocklist, because a blocklist is trivially defeated:
+
+```sql
+SELECT 1 /* comment */ ; DROP TABLE games
+```
+
+Scanning for `DROP` first sees a comment hiding a semicolon. So the order matters:
+
+1. Strip comments and string literals, so nothing can hide syntax
+2. Assert what remains is a single `SELECT` or `WITH`
+3. Only then scan for forbidden constructs
+4. Inject our own `LIMIT`, and cap any the model supplied
+
+Blanking literals first also avoids false positives — `WHERE note = 'Roster update'` is data,
+not a verb, and still works.
+
+The D1 binding should also be read-only in production. The guard is defence in depth, not
+the only defence.
+
+## What went wrong while building it
+
+The architecture worked immediately. Everything below was found by running it, and each one
+is a more useful lesson than the parts that worked.
+
+**1. The model catalog disagreed with the runtime.** The first model choice returned
+"deprecated" at runtime while the account's own model-search API still listed it as
+available with no deprecation flag — and listed a second dead model too. Fixed by
+test-running six candidates against the live runtime before committing. Don't trust a
+catalog you can probe.
+
+**2. Ambiguous schema comments produced wrong SQL.** "40+ against Boston" became
+`team = 'BOS'`, but `team` is *his* team. Zero rows. Fixed in the schema comments — and
+notably, this model follows schema comments far more reliably than rules in the system
+prompt. A later fix that was ignored as a prompt rule worked immediately when moved into a
+schema comment.
+
+**3. Right numbers, wrong question.** "How many games in Miami?" produced
+`COUNT(*) FROM seasons` = 2, and the summary read "He played 2 games in Miami." Every number
+was real; the sentence was still wrong. Fixed by documenting in the schema that `games` is a
+curated sample and counts must come from `seasons.games`.
+
+**4. The summarizer contradicted the database.** About one run in three it reported "no
+matching games" while D1 had returned rows. The cause was a prompt instruction — "if the rows
+are empty, say so" — that a small model fired regardless of the rows. **Fixed by deciding the
+empty case in code, before the model is called at all.** A branch the code can evaluate
+should never be delegated to a model. It also saves an inference call.
+
+**5. An empty column answered a question it shouldn't have.** "How many MVPs did he win?"
+returned **0**. The dataset has no awards data, so `accolades` was NULL on every row. The
+column had already been removed from the model's schema prompt, but the model invented a
+query against it anyway, the column still physically existed, and the query *succeeded*.
+
+This is the one worth internalizing:
+
+> Grounding a model in a datastore prevents **invented** numbers. It does not prevent a
+> **wrong query** from producing a confidently wrong answer. An empty column is more
+> dangerous than a missing one, because an empty column answers.
+
+Fixed by dropping the column and catching D1 errors, so a query against absent data reads as
+"not in this database" rather than as a number.
+
+**6. Off-by-one in an inclusive range.** "40+" generated `points > 40`, silently excluding
+19 exactly-40-point games. Caught by checking a boundary case rather than trusting an answer
+that looked right.
+
+## Limits worth stating
+
+- **`games` is a curated sample**, not every game — selected by objective thresholds (40+
+  points, playoff 35+, triple-doubles). Counting questions route to `seasons.games`, which
+  holds true totals.
+- **No awards, salary, or biographical data.** Those questions are refused rather than
+  guessed. Deliberately left absent instead of hand-entered.
+- **The guard has never fired in production.** Injection attempts are refused by the model at
+  the prompt layer first. Those tests prove the *prompt* held, not the validator — the guard
+  exists for the day the prompt doesn't, and is proven by the unit tests.
+- **The custom domain sits behind the zone's bot protection**, which challenges non-browser
+  clients. The `workers.dev` URL is kept live as the unchallenged path for API use.
+
+## Cost
+
+Everything here fits the Cloudflare free tier: 100k Worker requests/day, 10k Workers AI
+Neurons/day, 5M D1 rows read/day. Two inference calls per question — one to write the SQL,
+one to describe the rows, skipped entirely when a query returns nothing.
+
+Data from the [balldontlie API](https://balldontlie.io). Per-player box scores require a paid
+tier; the free tier serves team-level results only.
