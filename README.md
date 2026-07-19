@@ -302,10 +302,13 @@ Two things worth knowing if you edit it:
 
 ## Deploy notifications
 
-`npm run deploy` deploys and then emails a summary. Cloudflare has **no "Worker deployed"
-alert type** — the only Workers alert is log-based observability, which fires on errors, not
-deployments. Workers Builds would provide one, but only if you deploy through Cloudflare's CI
-rather than from a laptop. So `deploy.sh` sends the mail itself, via the `hey` CLI.
+`npm run deploy` deploys and then emails a summary.
+
+Cloudflare has **no "Worker deployed" alert type at all** — verified against all 57 alert
+types on the account. The only Workers entry is log-based observability, which fires on
+errors, not deployments. There *is* a Pages alert group, which is why a Pages deploy
+notification is possible; Workers has no equivalent, and connecting Workers Builds does not
+add one. So `deploy.sh` sends the mail itself, via the `hey` CLI.
 
 The email carries the commit, version ID, and a **live health check of the thing just
 shipped** — so it reports reality rather than merely that `wrangler` exited 0.

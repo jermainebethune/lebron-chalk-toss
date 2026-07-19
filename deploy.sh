@@ -7,10 +7,11 @@
 # status of a pipeline is the LAST command's (tee), not wrangler's. Capturing
 # the status directly is the fix.
 #
-# Cloudflare has no "Worker deployed" notification alert type — the only Workers
-# alert is log-based observability, which fires on errors, not deployments.
-# Workers Builds would provide one, but that means deploying through Cloudflare's
-# CI rather than from here. Hence sending the mail ourselves.
+# Cloudflare has no "Worker deployed" notification alert type at all — checked
+# against every alert type on the account. The only Workers alert is log-based
+# observability, which fires on errors, not deployments. Pages has a deploy
+# alert group; Workers does not, and connecting Workers Builds does not add one.
+# So we send the mail ourselves.
 #
 # Only fires for `npm run deploy`. A bare `wrangler deploy` skips it.
 
