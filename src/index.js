@@ -15,6 +15,14 @@ import { page } from './ui.js';
 const SQL_MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct';
 const PROSE_MODEL = '@cf/meta/llama-3.2-3b-instruct';
 
+// Every inference goes through AI Gateway: caching, request logs, and per-model
+// analytics for free. Both prompts are self-invalidating — the SQL prompt
+// contains the schema, the prose prompt contains the returned rows — so a data
+// or schema change produces a different prompt and therefore a cache miss.
+// Nothing stale can be served.
+const GATEWAY = 'chalk-toss';
+const gatewayOpts = (skipCache) => ({ gateway: { id: GATEWAY, skipCache: Boolean(skipCache) } });
+
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -63,7 +71,7 @@ async function provenance(env) {
   }
 }
 
-async function ask(question, env) {
+async function ask(question, env, skipCache = false) {
   const meta = await provenance(env);
 
   // 1. Question -> SQL
@@ -71,7 +79,7 @@ async function ask(question, env) {
     messages: sqlPrompt(question),
     max_tokens: 300,
     temperature: 0,
-  });
+  }, gatewayOpts(skipCache));
   const raw = textOf(drafted).trim();
 
   if (/^UNANSWERABLE/i.test(raw)) {
@@ -137,7 +145,7 @@ async function ask(question, env) {
     messages: prosePrompt(question, sql, rows, truncated),
     max_tokens: 200,
     temperature: 0,
-  });
+  }, gatewayOpts(skipCache));
 
   let answer = textOf(written).trim() || 'The query ran but produced no summary.';
   if (truncated) {
@@ -184,8 +192,14 @@ export default {
         return json({ error: allowed.reason }, 401);
       }
 
+      // The eval harness must bypass the cache, or it tests the cache rather
+      // than the model — a suite that replays yesterday's answers would pass
+      // even after the model started failing. Restricted to API-key callers so
+      // a public visitor cannot force cache misses and drain the budget.
+      const skipCache = allowed.via === 'api-key' && payload?.skipCache === true;
+
       try {
-        return json(await ask(question.trim(), env));
+        return json(await ask(question.trim(), env, skipCache));
       } catch (err) {
         if (err instanceof SqlRejected) {
           // The guard did its job. Say so plainly rather than letting the model

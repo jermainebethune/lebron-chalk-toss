@@ -126,6 +126,35 @@ returns a real number that is not remotely the answer. That is the MVP bug all o
 rather than an instinct, and re-running the comparison after any prompt change takes one
 command.
 
+## AI Gateway
+
+Every inference goes through an AI Gateway (`chalk-toss`), which adds caching, request logs
+and per-model analytics for nothing.
+
+**Repeat questions cost zero.** Measured, not assumed — five identical requests consumed
+**0 Neurons and 0 inference calls**, against the 178 they would otherwise have cost. Latency
+drops from ~1.8s to ~0.4s.
+
+Caching is safe here because both prompts are **self-invalidating**: the SQL prompt contains
+the schema, the prose prompt contains the returned rows. Change the data or the schema and
+the prompt changes, so the cache key changes. Nothing stale can be served.
+
+### The eval has to bypass it
+
+A suite that replays cached answers would keep passing long after the model started failing —
+it would be testing the cache, not the model. So `eval/run.mjs` sends `skipCache: true`.
+
+That flag is honoured **only for API-key callers**, so a public visitor cannot force cache
+misses and drain the daily budget.
+
+Verified by latency, which is immediate where analytics are not: 1.17s cold → 0.42s cached →
+**1.36s with `skipCache`**. Real inference resumes on demand.
+
+> **Gotcha:** the GraphQL analytics lag several minutes behind real time. A reading of "0
+> Neurons consumed" right after a run looks exactly like a broken cache bypass. It was lag —
+> the same numbers appeared later. Confirm behaviour with latency before trusting a fresh
+> analytics query.
+
 ## Who can spend a Neuron
 
 `/api/ask` was originally open to anyone who knew the URL. At ~35.5 Neurons per question

@@ -56,7 +56,7 @@ async function askApp(question) {
   const res = await fetch(`${API}/api/ask`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': KEY },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, skipCache: true }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
