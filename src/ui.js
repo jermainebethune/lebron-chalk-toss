@@ -194,9 +194,19 @@ export const page = `<!doctype html>
   }
   .error .text, .wait .text { margin: 0; color: var(--chalk-mid); }
 
+  /* The SQL must WRAP, not scroll.
+     It was white-space: pre with overflow-x: auto — fine on a desktop, but on a
+     phone it silently chopped the query mid-word ("... FROM seasons ORD") with
+     no visible affordance that more existed. Showing the query is the entire
+     "check my work" premise of this page; a truncated one is worse than none,
+     because it looks complete. Wrapping keeps every character on screen at any
+     width. */
   pre {
     margin: 0; font-family: var(--mono); font-size: 0.8rem; line-height: 1.6;
-    color: var(--amber); overflow-x: auto; white-space: pre;
+    color: var(--amber);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .tablewrap { overflow-x: auto; }
@@ -267,8 +277,24 @@ export const page = `<!doctype html>
     .how { grid-template-columns: 1fr; }
     .shot.side { height: 34vh; min-height: 14rem; order: 0; }
     .shot.side::after { background: linear-gradient(0deg, var(--court) 3%, transparent 55%); }
+    /* Three controls now (input, Ask, Clear). Give the input its own full-width
+       row and let the two buttons share the next one, rather than letting flex
+       squeeze all three onto one line. */
     form { flex-wrap: wrap; }
-    input[type=text] { flex: 1 1 12rem; }
+    input[type=text] { flex: 1 0 100%; }
+    button.ask { flex: 1 1 auto; }
+    button.clear { flex: 0 0 auto; }
+
+    /* Wide result tables scroll. Hint that they do, since a cut-off column on a
+       phone otherwise reads as missing data. */
+    .tablewrap { position: relative; }
+    .tablewrap::after {
+      content: "swipe →";
+      position: absolute; top: 0; right: 0;
+      font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--chalk-dim);
+      pointer-events: none;
+    }
   }
 
   @media (prefers-reduced-motion: reduce) {
