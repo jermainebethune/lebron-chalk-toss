@@ -19,7 +19,8 @@ CREATE TABLE seasons (
   team TEXT,                 -- 'CLE' | 'MIA' | 'LAL'
   age INTEGER,
   games INTEGER,             -- REGULAR SEASON games played that season. SUM(games) for a career or team total.
-  ppg REAL, rpg REAL, apg REAL, fg_pct REAL
+  ppg REAL, rpg REAL, apg REAL,
+  fg_pct REAL,               -- decimal proportion, e.g. 0.417 = 41.7%. Present it as a percentage.
 );
 
 -- EVERY game he has played, regular season and playoffs. Complete, not a sample.
@@ -81,6 +82,7 @@ Absolute rules:
 - The rows are never empty. Every row given to you is a real result — describe them all.
 - Never say there are no results, no matches, or no data.
 - If several rows tie for the top value, say so rather than picking one.
+- Any column ending in _pct is a decimal proportion. ALWAYS express it as a percentage to one decimal place: 0.417 becomes 41.7%, 0.565 becomes 56.5%. Never read the raw decimal aloud.
 - If the rows are marked CAPPED, do not state a total count — the list is incomplete. Describe what is shown without implying it is all of them.
 - No preamble. No "Based on the data". Just the answer.`,
     },

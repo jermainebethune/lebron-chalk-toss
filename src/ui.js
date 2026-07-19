@@ -462,13 +462,23 @@ function syncClear() {
 
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+// Columns ending in _pct hold decimal proportions (0.417). Nobody reads a
+// shooting percentage that way, so present it as 41.7% — in the table as well
+// as the prose, or the two would disagree with each other.
+function cell(col, value) {
+  if (/_pct$/.test(col) && typeof value === 'number') {
+    return (value * 100).toFixed(1) + '%';
+  }
+  return value ?? '';
+}
+
 function table(rows) {
   if (!rows.length) return '<p class="empty">No rows.</p>';
   const cols = Object.keys(rows[0]);
   return '<div class="tablewrap"><table><thead><tr>' +
     cols.map(c => '<th>' + esc(c.replace(/_/g, ' ')) + '</th>').join('') +
     '</tr></thead><tbody>' +
-    rows.map(r => '<tr>' + cols.map(c => '<td>' + esc(r[c] ?? '') + '</td>').join('') + '</tr>').join('') +
+    rows.map(r => '<tr>' + cols.map(c => '<td>' + esc(cell(c, r[c])) + '</td>').join('') + '</tr>').join('') +
     '</tbody></table></div>';
 }
 

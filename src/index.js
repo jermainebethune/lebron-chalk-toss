@@ -23,6 +23,28 @@ const PROSE_MODEL = '@cf/meta/llama-3.2-3b-instruct';
 const GATEWAY = 'chalk-toss';
 const gatewayOpts = (skipCache) => ({ gateway: { id: GATEWAY, skipCache: Boolean(skipCache) } });
 
+/**
+ * Run inference, retrying once on a transient failure.
+ *
+ * Workers AI occasionally errors for no reason attributable to the request —
+ * an eval run failed six of twenty cases with 500s that were not reproducible
+ * minutes later, and the same suite passed 20/20 immediately after. Without a
+ * retry, one upstream blip becomes a user-facing error on a question that is
+ * perfectly answerable.
+ *
+ * One retry, not many: if the second attempt also fails, something is actually
+ * wrong and hammering it will not help.
+ */
+async function infer(env, model, inputs, skipCache) {
+  try {
+    return await env.AI.run(model, inputs, gatewayOpts(skipCache));
+  } catch (err) {
+    console.warn('inference failed, retrying once', model, err?.message);
+    await new Promise((r) => setTimeout(r, 250));
+    return env.AI.run(model, inputs, gatewayOpts(skipCache));
+  }
+}
+
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
@@ -75,11 +97,11 @@ async function ask(question, env, skipCache = false) {
   const meta = await provenance(env);
 
   // 1. Question -> SQL
-  const drafted = await env.AI.run(SQL_MODEL, {
+  const drafted = await infer(env, SQL_MODEL, {
     messages: sqlPrompt(question),
     max_tokens: 300,
     temperature: 0,
-  }, gatewayOpts(skipCache));
+  }, skipCache);
   const raw = textOf(drafted).trim();
 
   if (/^UNANSWERABLE/i.test(raw)) {
@@ -141,11 +163,11 @@ async function ask(question, env, skipCache = false) {
   const truncated = rows.length >= MAX_LIMIT;
 
   // 6. Rows -> prose. The model only ever sees a non-empty result set.
-  const written = await env.AI.run(PROSE_MODEL, {
+  const written = await infer(env, PROSE_MODEL, {
     messages: prosePrompt(question, sql, rows, truncated),
     max_tokens: 200,
     temperature: 0,
-  }, gatewayOpts(skipCache));
+  }, skipCache);
 
   let answer = textOf(written).trim() || 'The query ran but produced no summary.';
   if (truncated) {
