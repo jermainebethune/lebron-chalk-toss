@@ -58,6 +58,17 @@ node extract.mjs > seed.sql && npm run seed
 The key is only used by the extractor. The deployed Worker reads D1 and nothing else, so
 there is no secret in production.
 
+## Deploying from a new machine
+
+```bash
+git clone https://github.com/jermainebethune/lebron-chalk-toss.git
+cd lebron-chalk-toss && npm install
+npx wrangler login && npx wrangler deploy
+```
+
+Secrets live on the Worker, data lives in D1, so neither is on any laptop. See
+[RECOVERY.md](RECOVERY.md) for what is machine-only and what cannot be recovered.
+
 ## Layout
 
 | File | Purpose |
