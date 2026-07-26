@@ -169,17 +169,26 @@ export const page = `<!doctype html>
 
   /* ------------------------------------------------------------- results */
   .results { max-width: 60rem; margin: 0 auto; padding: 0 clamp(1.5rem, 5vw, 3rem); }
-  #out { display: flex; flex-direction: column; gap: 1px; padding: clamp(2.5rem, 6vw, 4.5rem) 0; }
+  #out { display: flex; flex-direction: column; gap: 2.25rem; padding: clamp(2.5rem, 6vw, 4.5rem) 0; }
   #out[hidden] { display: none; }
+
+  /* Each question-and-answer is one exchange. The slabs inside it keep their
+     1px seam; the wider gap is between exchanges, so a conversation reads as
+     a stack of complete answers rather than one undifferentiated pile. */
+  .exchange { display: flex; flex-direction: column; gap: 1px; }
 
   /* scroll-margin so scrolling an answer into view leaves breathing room
      above it rather than jamming it against the viewport edge */
   .slab { background: var(--panel); border-left: 3px solid var(--edge); padding: 1.35rem 1.6rem; scroll-margin-top: 2.5rem; }
   .slab.answer { --edge: var(--heat); }
   .slab.query  { --edge: var(--amber); }
+  .slab.chart  { --edge: var(--chalk-dim); }
   .slab.rows   { --edge: var(--chalk-dim); }
   .slab.error  { --edge: var(--heat-deep); }
   .slab.wait   { --edge: var(--line); }
+  .slab.q      { --edge: var(--line); padding-top: 0.9rem; padding-bottom: 0.9rem; }
+  .slab.q .tag { color: var(--chalk-dim); margin-bottom: 0.35rem; }
+  .slab.q .text { margin: 0; color: var(--chalk-mid); font-size: 0.95rem; }
 
   .tag {
     font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.2em;
@@ -193,6 +202,37 @@ export const page = `<!doctype html>
     text-wrap: pretty;
   }
   .error .text, .wait .text { margin: 0; color: var(--chalk-mid); }
+
+  /* A caret marks the answer as still arriving. The global reduced-motion rule
+     kills the blink, which degrades it to a steady caret — still a signal. */
+  .answer .text.streaming::after {
+    content: "\\258D"; color: var(--heat); margin-left: 0.08em;
+    animation: caret 1s steps(1) infinite;
+  }
+  @keyframes caret { 50% { opacity: 0; } }
+
+  /* ------------------------------------------------------------- chart */
+  /* Chalk marks on the board: the series is drawn in chalk, grid and axes
+     recede into the surface, and only the hovered/peak mark takes heat red.
+     Values and labels stay in ink colours, never the series colour. */
+  .chartwrap svg { display: block; width: 100%; height: auto; }
+  .c-grid { stroke: var(--line); stroke-width: 1; }
+  .c-axis { fill: var(--chalk-dim); font-family: var(--mono); font-size: 10px; }
+  .c-val  { fill: var(--chalk); font-family: var(--mono); font-size: 11px; }
+  .c-bar  { fill: var(--chalk); fill-opacity: 0.85; }
+  .c-bar.hot { fill: var(--heat); fill-opacity: 1; }
+  .c-line { stroke: var(--chalk); stroke-width: 2; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+  .c-dot  { fill: var(--chalk); }
+  .c-dot.hot { fill: var(--heat); r: 5; }
+  .c-xhair { stroke: var(--chalk-dim); stroke-width: 1; visibility: hidden; }
+
+  #tip {
+    position: fixed; z-index: 70; visibility: hidden; pointer-events: none;
+    background: var(--court-lift); border: 1px solid var(--line); border-radius: 2px;
+    color: var(--chalk); font-family: var(--mono); font-size: 0.72rem;
+    padding: 0.35rem 0.6rem; white-space: nowrap;
+  }
+  #tip b { color: var(--amber); font-weight: 400; }
 
   /* The SQL must WRAP, not scroll.
      It was white-space: pre with overflow-x: auto — fine on a desktop, but on a
@@ -305,6 +345,7 @@ export const page = `<!doctype html>
 <body>
 
 <canvas id="dust" aria-hidden="true"></canvas>
+<div id="tip" role="presentation"></div>
 
 <section class="hero">
   <div class="shot">
@@ -456,6 +497,14 @@ const input = document.getElementById('q');
 const go = document.getElementById('go');
 const clearBtn = document.getElementById('clear');
 const out = document.getElementById('out');
+const tip = document.getElementById('tip');
+const PLACEHOLDER = input.placeholder;
+
+// The last few answered exchanges ride along with every request so the model
+// can resolve "what about the playoffs?" against them. The server re-validates
+// all of it; this array is a courtesy copy, not a trusted one.
+const history = [];
+const HISTORY_MAX = 4;
 
 // Clear only exists when there is state to clear — an always-present button
 // that does nothing most of the time is just noise next to the primary action.
@@ -486,32 +535,234 @@ function table(rows) {
 }
 
 function showCredit(p) {
-  if (!p) return;
-  if (!p.verified) {
-    document.getElementById('credit').insertAdjacentHTML('afterbegin',
-      '<b style="color:var(--heat)">Placeholder data &mdash; not real statistics.</b> ');
-  }
+  if (!p || p.verified) return;
+  if (document.getElementById('data-flag')) return; // one warning, not one per ask
+  document.getElementById('credit').insertAdjacentHTML('afterbegin',
+    '<b id="data-flag" style="color:var(--heat)">Placeholder data &mdash; not real statistics.</b> ');
 }
 
-// The hero is full-height, so anything written into #out starts below the
-// fold. Every render must bring itself into view or the page looks inert —
-// this caught out the "one moment" and error states, which appeared to do
-// nothing at all.
-function render(html) {
+function slab(cls, tag, inner) {
+  return '<div class="slab ' + cls + '"><p class="tag">' + tag + '</p>' + inner + '</div>';
+}
+
+// ------------------------------------------------------------------ chart
+// One chart per answer, drawn only when the rows have a shape worth drawing:
+// at least three rows, a label column, one numeric column. Single series, so
+// no legend — the slab tag names the metric. The table below the chart is the
+// accessible/precise view of the same rows.
+let chartSeq = 0;
+const chartData = {};
+const CW = 720, CH = 240, ML = 46, MR = 12, MT = 18, MB = 30;
+const PW = CW - ML - MR, PH = CH - MT - MB;
+
+function niceStep(rough) {
+  const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+  const unit = rough / mag;
+  return (unit <= 1 ? 1 : unit <= 2 ? 2 : unit <= 5 ? 5 : 10) * mag;
+}
+
+const fmtVal = (v, pct) =>
+  (Number.isInteger(v) ? String(v) : v.toFixed(1)) + (pct ? '%' : '');
+
+function chartOf(rows) {
+  if (!Array.isArray(rows) || rows.length < 3) return '';
+  const cols = Object.keys(rows[0]);
+  const skip = { id: 1, home: 1, playoff: 1 }; // flags and keys, not stats
+  const labelCol = ['season', 'date'].find(c => cols.includes(c)) ||
+    cols.find(c => typeof rows[0][c] === 'string');
+  const valueCol = cols.find(c => c !== labelCol && !skip[c] &&
+    rows.every(r => typeof r[c] === 'number'));
+  if (!labelCol || !valueCol) return '';
+
+  const pct = /_pct$/.test(valueCol);
+  const labels = rows.map(r => String(r[labelCol]));
+  const values = rows.map(r => pct ? r[valueCol] * 100 : r[valueCol]);
+  if (values.some(v => v < 0)) return '';
+
+  // A line implies order. Rows ranked by the SQL (top seasons by ppg) must be
+  // bars — a line over a ranked axis would draw a fake trend.
+  const chrono = (labelCol === 'season' || labelCol === 'date') &&
+    labels.every((l, i) => !i || l >= labels[i - 1]);
+  const form = chrono && labels.length >= 8 ? 'line' : 'bars';
+
+  const max = Math.max.apply(null, values) || 1;
+  const step = niceStep(max / 4);
+  const top = Math.ceil(max / step) * step;
+  const y = v => MT + PH - (v / top) * PH;
+
+  let g = '';
+  for (let v = 0; v <= top + 1e-9; v += step) {
+    const yy = y(v);
+    g += '<line class="c-grid" x1="' + ML + '" y1="' + yy + '" x2="' + (CW - MR) + '" y2="' + yy + '"/>';
+    g += '<text class="c-axis" x="' + (ML - 7) + '" y="' + (yy + 3.5) + '" text-anchor="end">' + fmtVal(v, pct) + '</text>';
+  }
+
+  const n = labels.length;
+  const slot = PW / n;
+  const centers = [];
+  const peak = values.indexOf(Math.max.apply(null, values));
+
+  if (form === 'bars') {
+    const bw = Math.min(40, Math.max(1, slot - 2)); // 2px seam between bars
+    for (let i = 0; i < n; i++) {
+      const cx = ML + i * slot + slot / 2;
+      centers.push(cx);
+      const x0 = cx - bw / 2;
+      const yTop = y(values[i]);
+      const h = MT + PH - yTop;
+      const r = Math.min(4, bw / 2, h); // rounded data-end, square baseline
+      g += '<path class="c-bar" data-i="' + i + '" d="M' + x0 + ',' + (MT + PH) +
+        ' L' + x0 + ',' + (yTop + r) + ' Q' + x0 + ',' + yTop + ' ' + (x0 + r) + ',' + yTop +
+        ' L' + (x0 + bw - r) + ',' + yTop + ' Q' + (x0 + bw) + ',' + yTop + ' ' + (x0 + bw) + ',' + (yTop + r) +
+        ' L' + (x0 + bw) + ',' + (MT + PH) + ' Z"/>';
+    }
+  } else {
+    const px = i => ML + (n === 1 ? PW / 2 : i * (PW / (n - 1)));
+    let pts = '';
+    for (let i = 0; i < n; i++) {
+      centers.push(px(i));
+      pts += (i ? ' ' : '') + px(i) + ',' + y(values[i]);
+    }
+    g += '<line class="c-xhair" x1="0" y1="' + MT + '" x2="0" y2="' + (MT + PH) + '"/>';
+    g += '<polyline class="c-line" points="' + pts + '"/>';
+    // Markers on every point until they would smear into the line itself;
+    // past that only the peak keeps one, since it also carries the label.
+    const marked = n <= 30 ? labels.map((_, i) => i) : [peak];
+    for (const i of marked) {
+      g += '<circle class="c-dot" data-i="' + i + '" cx="' + centers[i] + '" cy="' + y(values[i]) + '" r="4"/>';
+    }
+  }
+
+  // One selective direct label — the peak. Everything else is in the tooltip
+  // and the table; a number on every mark is noise.
+  const anchor = peak < n / 5 ? 'start' : peak > n * 4 / 5 ? 'end' : 'middle';
+  g += '<text class="c-val" x="' + centers[peak] + '" y="' + (y(values[peak]) - 8) +
+    '" text-anchor="' + anchor + '">' + fmtVal(values[peak], pct) + '</text>';
+
+  const every = Math.max(1, Math.ceil(n / 6));
+  for (let i = 0; i < n; i++) {
+    if (i !== 0 && i !== n - 1 && i % every) continue;
+    if (i !== 0 && i !== n - 1 && n - 1 - i < every) continue; // don't crowd the last label
+    const short = labelCol === 'date' ? labels[i].slice(0, 7) : labels[i];
+    const a = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+    g += '<text class="c-axis" x="' + centers[i] + '" y="' + (CH - 9) + '" text-anchor="' + a + '">' + esc(short) + '</text>';
+  }
+
+  const id = chartSeq++;
+  chartData[id] = { labels, values, pct, form, centers };
+  const title = valueCol.replace(/_/g, ' ') + ' by ' + labelCol;
+  return slab('chart', 'The shape of it &mdash; ' + esc(title),
+    '<div class="chartwrap"><svg viewBox="0 0 ' + CW + ' ' + CH + '" data-ci="' + id +
+    '" role="img" aria-label="' + esc(title) + ', ' + n +
+    ' values; exact numbers in the table below">' + g + '</svg></div>');
+}
+
+// Hover: one delegated listener and one shared tooltip for every chart on the
+// page. Nearest mark by x, so the hit target is the full column, not the
+// 2px-wide mark itself.
+let hotChart = null, hotIdx = -1;
+
+function clearHot() {
+  if (hotChart !== null) {
+    const svg = document.querySelector('svg[data-ci="' + hotChart + '"]');
+    if (svg) {
+      const mark = svg.querySelector('[data-i="' + hotIdx + '"]');
+      if (mark) mark.classList.remove('hot');
+      const xh = svg.querySelector('.c-xhair');
+      if (xh) xh.style.visibility = 'hidden';
+    }
+  }
+  tip.style.visibility = 'hidden';
+  hotChart = null; hotIdx = -1;
+}
+
+document.addEventListener('pointermove', (e) => {
+  const svg = e.target.closest ? e.target.closest('svg[data-ci]') : null;
+  if (!svg) { if (hotChart !== null) clearHot(); return; }
+  const ci = svg.getAttribute('data-ci');
+  const d = chartData[ci];
+  if (!d) return;
+  const box = svg.getBoundingClientRect();
+  const vx = (e.clientX - box.left) / box.width * CW;
+  let idx = 0, best = Infinity;
+  for (let i = 0; i < d.centers.length; i++) {
+    const dist = Math.abs(d.centers[i] - vx);
+    if (dist < best) { best = dist; idx = i; }
+  }
+  if (hotChart !== ci || hotIdx !== idx) {
+    clearHot();
+    hotChart = ci; hotIdx = idx;
+    const mark = svg.querySelector('[data-i="' + idx + '"]');
+    if (mark) mark.classList.add('hot');
+    if (d.form === 'line') {
+      const xh = svg.querySelector('.c-xhair');
+      if (xh) {
+        xh.setAttribute('x1', d.centers[idx]);
+        xh.setAttribute('x2', d.centers[idx]);
+        xh.style.visibility = 'visible';
+      }
+    }
+    tip.innerHTML = esc(d.labels[idx]) + ' &middot; <b>' + fmtVal(d.values[idx], d.pct) + '</b>';
+    tip.style.visibility = 'visible';
+  }
+  const left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+  tip.style.left = left + 'px';
+  tip.style.top = (e.clientY - 34) + 'px';
+});
+
+// The tooltip is position: fixed, so a scroll moves the chart out from under
+// it and leaves it floating over whatever arrives. Scrolling ends the hover.
+window.addEventListener('scroll', () => { if (hotChart !== null) clearHot(); }, { passive: true });
+
+// ------------------------------------------------------------ the exchange
+function bringIntoView(el) {
+  el.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+}
+
+// Each ask appends an exchange to the transcript instead of replacing the
+// page — that is what makes a follow-up feel like a follow-up. Transient
+// notices (the Turnstile "one moment") are removed before the next ask so
+// they don't fossilize into the conversation.
+function dropTransient() {
+  const last = out.lastElementChild;
+  if (last && last.dataset.transient) last.remove();
+}
+
+function appendExchange(html, transient) {
+  dropTransient();
+  const ex = document.createElement('div');
+  ex.className = 'exchange';
+  if (transient) ex.dataset.transient = '1';
+  ex.innerHTML = html;
   out.hidden = false;
-  out.innerHTML = html;
+  out.appendChild(ex);
   syncClear();
-  (out.firstElementChild || out).scrollIntoView({
-    behavior: reduceMotion ? 'auto' : 'smooth',
-    block: 'start'
-  });
+  bringIntoView(ex);
+  return ex;
+}
+
+function errorHtml(data) {
+  return slab('error',
+    data.guarded ? 'Query rejected by the guard' : 'Not this time',
+    '<p class="text">' + esc(data.error || 'Request failed.') + '</p>');
+}
+
+function resultHtml(data) {
+  let html = slab('answer', 'Answer', '<p class="text">' + esc(data.answer || '') + '</p>');
+  if (data.sql) {
+    html += slab('query', 'The query the model wrote', '<pre>' + esc(data.sql) + '</pre>');
+    html += chartOf(data.rows);
+    html += slab('rows', 'Straight from the record &mdash; every number above came from here',
+      table(data.rows));
+  }
+  return html;
 }
 
 async function ask(question) {
   const token = currentToken();
   if (!token) {
-    render('<div class="slab wait"><p class="tag">One moment</p>' +
-      '<p class="text">Verification is still clearing &mdash; give it a second and ask again.</p></div>');
+    appendExchange(slab('wait', 'One moment',
+      '<p class="text">Verification is still clearing &mdash; give it a second and ask again.</p>'), true);
     return;
   }
 
@@ -520,52 +771,111 @@ async function ask(question) {
   toss(r.left + r.width / 2, r.top + r.height / 2);
 
   go.disabled = true;
-  render('<div class="slab wait"><p class="tag">Working</p><p class="text">Writing a query&hellip;</p></div>');
+  const ex = appendExchange(
+    slab('q', 'You asked', '<p class="text">' + esc(question) + '</p>') +
+    slab('wait', 'Working', '<p class="text">Writing a query&hellip;</p>'));
+  const wait = ex.querySelector('.slab.wait');
+
+  let sql = null, gotRows = false, answerEl = null, answerText = '';
+
+  // The stream is a sequence of typed JSON events — see askStream() in the
+  // Worker for the protocol. "meta" arrives once the rows are final, "token"
+  // repeats while the answer is being written, "result" replaces both for
+  // answers that were decided in code.
+  const handle = (ev) => {
+    if (ev.type === 'meta') {
+      showCredit(ev.provenance);
+      sql = ev.sql;
+      gotRows = ev.rows && ev.rows.length > 0;
+      wait.remove();
+      ex.insertAdjacentHTML('beforeend', resultHtml({ answer: '', sql: ev.sql, rows: ev.rows }));
+      answerEl = ex.querySelector('.answer .text');
+      answerEl.classList.add('streaming');
+      bringIntoView(ex);
+    } else if (ev.type === 'token') {
+      if (!answerEl) return;
+      answerText += ev.text;
+      answerEl.textContent = answerText.replace(/^\\s+/, '');
+    } else if (ev.type === 'result') {
+      showCredit(ev.provenance);
+      sql = ev.sql;
+      gotRows = ev.rows && ev.rows.length > 0;
+      wait.remove();
+      ex.insertAdjacentHTML('beforeend', resultHtml(ev));
+      bringIntoView(ex);
+    } else if (ev.type === 'error') {
+      if (wait.isConnected) wait.remove();
+      if (answerEl) answerEl.classList.remove('streaming');
+      ex.insertAdjacentHTML('beforeend', errorHtml(ev));
+      sql = null;
+    }
+  };
 
   try {
     const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ question, turnstileToken: token })
+      body: JSON.stringify({ question, turnstileToken: token, history: history.slice(), stream: true })
     });
-    const data = await res.json();
     resetToken();
 
-    if (!res.ok) {
-      render('<div class="slab error"><p class="tag">' +
-        (data.guarded ? 'Query rejected by the guard' : 'Not this time') +
-        '</p><p class="text">' + esc(data.error || 'Request failed.') + '</p></div>');
+    // Auth and validation failures are decided before the stream opens, so
+    // they still arrive as ordinary JSON.
+    const ctype = res.headers.get('content-type') || '';
+    if (ctype.indexOf('text/event-stream') === -1) {
+      const data = await res.json().catch(() => ({}));
+      wait.remove();
+      ex.insertAdjacentHTML('beforeend', errorHtml(data));
+      bringIntoView(ex);
       return;
     }
 
-    showCredit(data.provenance);
-
-    let html = '<div class="slab answer"><p class="tag">Answer</p><p class="text">' +
-      esc(data.answer) + '</p></div>';
-
-    if (data.sql) {
-      html += '<div class="slab query"><p class="tag">The query the model wrote</p><pre>' +
-        esc(data.sql) + '</pre></div>';
-      html += '<div class="slab rows"><p class="tag">Straight from the record &mdash; every number above came from here</p>' +
-        table(data.rows) + '</div>';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buf += decoder.decode(chunk.value, { stream: true });
+      const events = buf.split('\\n\\n');
+      buf = events.pop();
+      for (const raw of events) {
+        const line = raw.split('\\n').find(l => l.indexOf('data:') === 0);
+        if (!line) continue;
+        let ev;
+        try { ev = JSON.parse(line.slice(5)); } catch (parseErr) { continue; }
+        handle(ev);
+      }
     }
-    render(html);
+
+    // Only answered questions become context. A refusal or a failed query
+    // has nothing a follow-up could safely build on.
+    if (sql && gotRows) {
+      history.push({ question, sql });
+      if (history.length > HISTORY_MAX) history.splice(0, history.length - HISTORY_MAX);
+      input.placeholder = 'Ask a follow-up — “what about the playoffs?”';
+    }
   } catch (err) {
-    render('<div class="slab error"><p class="tag">Error</p><p class="text">Could not reach the server.</p></div>');
+    if (wait.isConnected) wait.remove();
+    ex.insertAdjacentHTML('beforeend',
+      slab('error', 'Error', '<p class="text">Could not reach the server.</p>'));
   } finally {
+    if (answerEl) answerEl.classList.remove('streaming');
     go.disabled = false;
   }
 }
 
 form.addEventListener('submit', (e) => {
   e.preventDefault();
-  if (input.value.trim()) ask(input.value.trim());
+  const q = input.value.trim();
+  if (!q) return;
+  input.value = '';
+  ask(q);
 });
 
 document.querySelectorAll('.chip').forEach(chip => {
   chip.addEventListener('click', () => {
-    input.value = chip.textContent;
-    syncClear();
+    input.value = '';
     ask(chip.textContent);
   });
 });
@@ -574,8 +884,11 @@ input.addEventListener('input', syncClear);
 
 clearBtn.addEventListener('click', () => {
   input.value = '';
+  input.placeholder = PLACEHOLDER;
   out.innerHTML = '';
   out.hidden = true;
+  history.length = 0;
+  clearHot();
   syncClear();
   input.focus();
   // Back to the top so the page reads as reset rather than just emptied.

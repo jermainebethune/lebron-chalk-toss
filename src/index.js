@@ -66,9 +66,11 @@ function textOf(result) {
   if (typeof direct === 'string') return direct;
   if (typeof direct === 'number' || typeof direct === 'boolean') return String(direct);
 
-  // OpenAI-style envelope (gpt-oss, granite).
+  // OpenAI-style envelope (gpt-oss, granite) — and its streaming delta form.
   const choice = result.choices?.[0]?.message?.content;
   if (typeof choice === 'string') return choice;
+  const delta = result.choices?.[0]?.delta?.content;
+  if (typeof delta === 'string') return delta;
 
   // Some models return content as an array of parts.
   if (Array.isArray(direct)) {
@@ -93,25 +95,52 @@ async function provenance(env) {
   }
 }
 
-async function ask(question, env, skipCache = false) {
+/**
+ * Follow-up context arrives from the client, which makes it user input.
+ * Cap the count and the field lengths, and drop anything malformed rather
+ * than erroring — a mangled history should degrade to a cold question, not
+ * take the request down. The SQL here is only ever prompt context; the only
+ * SQL that reaches D1 is what the model writes THIS turn, and that still
+ * goes through the guard.
+ */
+function cleanHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((h) => typeof h?.question === 'string' && typeof h?.sql === 'string'
+      && h.question.trim() && h.sql.trim()
+      && h.question.length <= 300 && h.sql.length <= 2000)
+    .slice(-4)
+    .map((h) => ({ question: h.question.trim(), sql: h.sql.trim() }));
+}
+
+/**
+ * Everything up to (but not including) the prose step: SQL generation, the
+ * guard, and the D1 query. Shared by the JSON and streaming paths so the two
+ * cannot drift apart.
+ *
+ * Returns { done } when the answer is already decided in code — unanswerable,
+ * query failure, empty result — or { sql, rows, truncated, provenance } when
+ * there are rows for the prose model to describe.
+ */
+async function resolve(question, history, env, skipCache = false) {
   const meta = await provenance(env);
 
   // 1. Question -> SQL
   const drafted = await infer(env, SQL_MODEL, {
-    messages: sqlPrompt(question),
+    messages: sqlPrompt(question, history),
     max_tokens: 300,
     temperature: 0,
   }, skipCache);
   const raw = textOf(drafted).trim();
 
   if (/^UNANSWERABLE/i.test(raw)) {
-    return {
+    return { done: {
       answer:
         "That can't be answered from this database. It holds every game he has played — minutes, points, rebounds, assists, steals, blocks, turnovers, opponent and date — plus season averages. No awards, salary, draft or biographical data.",
       sql: null,
       rows: [],
       provenance: meta,
-    };
+    } };
   }
 
   // 2. Validate before it goes anywhere near D1
@@ -130,13 +159,13 @@ async function ask(question, env, skipCache = false) {
     rows = result.results ?? [];
   } catch (dbErr) {
     console.error('query failed', sql, dbErr);
-    return {
+    return { done: {
       answer:
         "That can't be answered from this database. It holds every game he has played plus season averages — no awards, salary, draft or biographical data.",
       sql,
       rows: [],
       provenance: meta,
-    };
+    } };
   }
 
   // 4. The empty case is decided in code, never by the model.
@@ -147,12 +176,12 @@ async function ask(question, env, skipCache = false) {
   // table. A branch the code can evaluate should never be delegated to a model.
   // Returning early also skips an inference call we don't need.
   if (rows.length === 0) {
-    return {
+    return { done: {
       answer: 'No games in the database match that.',
       sql,
       rows,
       provenance: meta,
-    };
+    } };
   }
 
   // 5. Did we hit the row ceiling? Then this is a PARTIAL answer, and saying so
@@ -162,19 +191,117 @@ async function ask(question, env, skipCache = false) {
   //    number — the user cannot tell it is incomplete.
   const truncated = rows.length >= MAX_LIMIT;
 
+  return { sql, rows, truncated, provenance: meta };
+}
+
+const TRUNCATION_NOTE = (n) => ` (Showing the first ${n} results — there are more.)`;
+
+async function ask(question, history, env, skipCache = false) {
+  const r = await resolve(question, history, env, skipCache);
+  if (r.done) return r.done;
+
   // 6. Rows -> prose. The model only ever sees a non-empty result set.
   const written = await infer(env, PROSE_MODEL, {
-    messages: prosePrompt(question, sql, rows, truncated),
+    messages: prosePrompt(question, r.sql, r.rows, r.truncated),
     max_tokens: 200,
     temperature: 0,
   }, skipCache);
 
   let answer = textOf(written).trim() || 'The query ran but produced no summary.';
-  if (truncated) {
-    answer += ` (Showing the first ${MAX_LIMIT} results — there are more.)`;
+  if (r.truncated) {
+    answer += TRUNCATION_NOTE(MAX_LIMIT);
   }
 
-  return { answer, sql, rows, truncated, provenance: meta };
+  return { answer, sql: r.sql, rows: r.rows, truncated: r.truncated, provenance: r.provenance };
+}
+
+/**
+ * The streaming variant. Same pipeline, but the response is server-sent
+ * events, and the prose model's tokens are forwarded as they arrive instead
+ * of being collected first. The page shows the answer forming immediately
+ * rather than staring at a spinner through the whole prose call.
+ *
+ * Event protocol — every event is a JSON object with a `type`:
+ *   meta    { sql, rows, truncated, provenance }  rows are final before prose starts
+ *   token   { text }                              a fragment of the answer
+ *   result  { ...full JSON answer }               code-decided answers, sent whole
+ *   error   { error, guarded }
+ *   done    {}
+ *
+ * Errors after the stream opens can't change the HTTP status — the 200 is
+ * long gone — so they travel as an `error` event and the client renders them
+ * exactly as it renders a non-2xx JSON body.
+ */
+function askStream(question, history, env, skipCache = false) {
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (obj) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+      try {
+        const r = await resolve(question, history, env, skipCache);
+        if (r.done) {
+          send({ type: 'result', ...r.done });
+          send({ type: 'done' });
+          return;
+        }
+
+        send({ type: 'meta', sql: r.sql, rows: r.rows, truncated: r.truncated, provenance: r.provenance });
+
+        const ai = await infer(env, PROSE_MODEL, {
+          messages: prosePrompt(question, r.sql, r.rows, r.truncated),
+          max_tokens: 200,
+          temperature: 0,
+          stream: true,
+        }, skipCache);
+
+        // Workers AI streams SSE bytes: `data: {"response":"tok"}` lines ending
+        // with `data: [DONE]`. Chunk boundaries can split a line, so buffer the
+        // partial tail between reads.
+        const reader = ai.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let wrote = false;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            const payload = line.match(/^data: ?(.*)/)?.[1];
+            if (!payload || payload === '[DONE]') continue;
+            let text = '';
+            try { text = textOf(JSON.parse(payload)); } catch { continue; }
+            if (text) {
+              wrote = true;
+              send({ type: 'token', text });
+            }
+          }
+        }
+
+        if (!wrote) send({ type: 'token', text: 'The query ran but produced no summary.' });
+        if (r.truncated) send({ type: 'token', text: TRUNCATION_NOTE(MAX_LIMIT) });
+        send({ type: 'done' });
+      } catch (err) {
+        if (err instanceof SqlRejected) {
+          send({ type: 'error', error: `Rejected the generated query: ${err.message}`, guarded: true });
+        } else {
+          console.error('ask failed', err);
+          send({ type: 'error', error: 'Something went wrong running that question.', guarded: false });
+        }
+      } finally {
+        try { controller.close(); } catch {}
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'content-type': 'text/event-stream; charset=utf-8',
+      'cache-control': 'no-cache',
+    },
+  });
 }
 
 export default {
@@ -220,8 +347,18 @@ export default {
       // a public visitor cannot force cache misses and drain the budget.
       const skipCache = allowed.via === 'api-key' && payload?.skipCache === true;
 
+      const history = cleanHistory(payload?.history);
+
+      // stream: true switches the response to server-sent events. Auth and
+      // validation failures above still return JSON — the stream only begins
+      // once the question is actually going to run, so the client can treat
+      // "content-type: application/json" as the error path.
+      if (payload?.stream === true) {
+        return askStream(question.trim(), history, env, skipCache);
+      }
+
       try {
-        return json(await ask(question.trim(), env, skipCache));
+        return json(await ask(question.trim(), history, env, skipCache));
       } catch (err) {
         if (err instanceof SqlRejected) {
           // The guard did its job. Say so plainly rather than letting the model

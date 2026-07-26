@@ -196,6 +196,18 @@ curl -X POST https://chalk-toss.jermaine-e7a.workers.dev/api/ask \
   -d '{"question":"What was his career high?"}'
 ```
 
+The payload takes two optional fields beyond `question`:
+
+- `"stream": true` switches the response to server-sent events: a `meta` event once the
+  rows are final (SQL, rows, provenance), `token` events as the prose model writes, and
+  `done`. Code-decided answers (unanswerable, empty result) arrive whole as a `result`
+  event. Auth and validation failures still return plain JSON — the stream only opens
+  once the question is actually going to run.
+- `"history": [{"question", "sql"}, ...]` carries the previous exchanges (up to 4) so
+  follow-ups resolve — "what about the playoffs?" reuses the prior question's conditions.
+  The history is prompt context only; the SQL that runs is always freshly written this
+  turn and still goes through the guard. The web page sends both fields automatically.
+
 Worth naming the mistake this fixed: the SQL guard was built carefully against an
 interesting threat — a model writing dangerous queries — while an ordinary one went
 unconsidered for the whole build. Anyone could just call it. Hardening the interesting

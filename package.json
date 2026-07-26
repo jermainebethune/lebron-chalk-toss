@@ -9,7 +9,7 @@
     "deploy": "./deploy.sh",
     "schema": "wrangler d1 execute lebron-oracle --remote --file=./schema.sql",
     "seed": "wrangler d1 execute lebron-oracle --remote --file=./seed.sql",
-    "test": "node --test test/",
+    "test": "node --test test/*.test.js",
     "deploy:quiet": "wrangler deploy",
     "eval": "node eval/run.mjs"
   },

@@ -42,7 +42,16 @@ CREATE TABLE games (
 -- All-NBA selections and contracts are NOT in this database — such questions
 -- are UNANSWERABLE.`.trim();
 
-export function sqlPrompt(question) {
+/**
+ * history is the prior exchanges of this conversation, oldest first, each
+ * { question, sql }. They are replayed as real user/assistant turns rather
+ * than pasted into the system prompt: the model resolves "what about the
+ * playoffs?" against them the same way it resolves any conversational
+ * reference, and the assistant turns double as examples of the output format.
+ * Only exchanges that produced SQL are included — refusals carry no context
+ * worth resolving against.
+ */
+export function sqlPrompt(question, history = []) {
   return [
     {
       role: 'system',
@@ -64,8 +73,13 @@ Rules:
   SELECT date, opponent, X FROM games WHERE X = (SELECT MAX(X) FROM games) ORDER BY date
 - "career high" on its own always means POINTS. "Minutes in his career high game" means the minutes of the highest-scoring game: SELECT date, opponent, minutes, points FROM games ORDER BY points DESC LIMIT 1 — order by the stat named, not by the stat asked for.
 - Select the columns needed to answer, not just one — include date, opponent and the relevant stat so the answer can be checked.
+- Later questions may refer back to earlier ones ("what about the playoffs?", "and against Boston?"). Read them as refining the previous question, and carry its conditions forward unless the new question replaces them.
 - If the question cannot be answered from these tables, reply exactly: UNANSWERABLE`,
     },
+    ...history.flatMap((h) => [
+      { role: 'user', content: h.question },
+      { role: 'assistant', content: h.sql },
+    ]),
     { role: 'user', content: question },
   ];
 }
@@ -83,6 +97,8 @@ Absolute rules:
 - Never say there are no results, no matches, or no data.
 - If several rows tie for the top value, say so rather than picking one.
 - Any column ending in _pct is a decimal proportion. ALWAYS express it as a percentage to one decimal place: 0.417 becomes 41.7%, 0.565 becomes 56.5%. Never read the raw decimal aloud.
+- ONLY _pct columns are percentages. Points, rebounds, assists, minutes and every other number are plain values — NEVER put a % sign on them.
+- If there are more than 10 rows, do NOT list them one by one. Give the shape in one or two sentences — the highest, the lowest, roughly where the rest sit. The reader has the full table.
 - If the rows are marked CAPPED, do not state a total count — the list is incomplete. Describe what is shown without implying it is all of them.
 - No preamble. No "Based on the data". Just the answer.`,
     },
