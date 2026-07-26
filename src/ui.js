@@ -362,7 +362,10 @@ export const page = `<!doctype html>
   </div>
   <p class="credit" id="credit">
     Stats from the balldontlie API. Photographs from Wikimedia Commons, cropped and resized &mdash;
-    <span id="photo-credit">credit and licence pending verification</span>.
+    <span id="photo-credit"><a href="https://commons.wikimedia.org/wiki/File:LeBron_James_2011_(cropped).jpg">Keith Allison</a>
+    (<a href="https://creativecommons.org/licenses/by-sa/2.0/">CC BY-SA 2.0</a>) and
+    <a href="https://commons.wikimedia.org/wiki/File:LeBron_James_at_GSW_(cropped).jpg">Steve Jurvetson</a>
+    (<a href="https://creativecommons.org/licenses/by/2.0/">CC BY 2.0</a>)</span>.
     <a href="https://github.com/jermainebethune/lebron-chalk-toss">Source on GitHub</a>
   </p>
 </footer>

@@ -336,18 +336,16 @@ Two things this got wrong first time, both worth knowing:
   succeeding masked `wrangler` failing. Now the status is captured with `PIPESTATUS`.
 - It only fires for `npm run deploy`. A bare `wrangler deploy` skips it.
 
-## Photographs — attribution still needed
+## Photographs — attribution
 
-The two photos in `public/img/` are from Wikimedia Commons (filenames matched the Commons
-naming convention), resized and re-compressed from ~900 KB down to 220 KB total.
+The two photos in `public/img/` are from Wikimedia Commons, resized and re-compressed from
+~900 KB down to 220 KB total. The site footer credits both photographers, links each licence,
+and notes the images were cropped and resized (a CC BY-SA requirement for modified works):
 
-**Most LeBron photographs on Commons are CC BY-SA, which requires naming the photographer,
-linking the licence, and noting that the image was modified.** These are cropped and resized,
-so that last part applies. The site footer currently carries a placeholder credit; it needs
-the real photographer and licence before this counts as properly attributed.
-
-To fix: find each file's page on Wikimedia Commons, take the author and licence, and replace
-the `#photo-credit` line in `src/ui.js`.
+- `lebron-heat-ball.jpg` — [LeBron James 2011 (cropped)](https://commons.wikimedia.org/wiki/File:LeBron_James_2011_(cropped).jpg)
+  by Keith Allison, [CC BY-SA 2.0](https://creativecommons.org/licenses/by-sa/2.0/)
+- `lebron-miami-6.jpg` — [LeBron James at GSW (cropped)](https://commons.wikimedia.org/wiki/File:LeBron_James_at_GSW_(cropped).jpg)
+  by Steve Jurvetson, [CC BY 2.0](https://creativecommons.org/licenses/by/2.0/)
 
 ## Limits worth stating
 
