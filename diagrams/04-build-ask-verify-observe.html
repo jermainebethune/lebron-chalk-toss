@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>The Chalk Toss — Build vs Ask vs Verify vs Observe</title>
+<title>The Chalk Toss — Build vs Refresh vs Ask vs Verify vs Observe</title>
 <style>
   :root {
     --cream:   #FBFAEF;
@@ -16,16 +16,17 @@
     --orange:  #D9700A;  --orange-tint:#FDF0E2;
     --red:     #C42B21;  --red-tint:   #FCEAE8;
     --teal:    #0F7B8A;  --teal-tint:  #E4F2F4;  --teal-line:  #A3D3DA;
+    --gold:    #8C6D1F;  --gold-tint:  #F7F1DC;  --gold-line:  #D9C88A;
 
     --sans: "Avenir Next", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 22px 26px 18px; width: 1480px;
+    margin: 0; padding: 22px 26px 18px; width: 1780px;
     background: var(--cream); color: var(--ink);
     font-family: var(--sans);
-    zoom: 0.99;
+    zoom: 0.9;
   }
 
   /* ---------------- header ---------------- */
@@ -39,7 +40,7 @@
   .head .tail { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
 
   /* ---------------- columns ---------------- */
-  .cols { display: grid; grid-template-columns: 0.95fr 1.3fr 0.95fr 0.95fr; gap: 16px; align-items: start; }
+  .cols { display: grid; grid-template-columns: 0.92fr 0.92fr 1.26fr 0.92fr 0.92fr; gap: 16px; align-items: start; }
   .col {
     border: 1.5px solid var(--cl); border-radius: 14px; background: var(--ct);
     padding: 14px 14px 15px;
@@ -48,6 +49,7 @@
   .col.b { --cl: var(--blue-line);   --ct: var(--blue-tint);   --c: var(--blue); }
   .col.p { --cl: var(--purple-line); --ct: var(--purple-tint); --c: var(--purple); }
   .col.t { --cl: var(--teal-line);   --ct: var(--teal-tint);   --c: var(--teal); }
+  .col.a { --cl: var(--gold-line);   --ct: var(--gold-tint);   --c: var(--gold); }
 
   .col > h2 {
     text-align: center; font-size: 19px; font-weight: 800; margin: 0 0 3px;
@@ -137,6 +139,8 @@
     <span class="tick"></span>
     <span class="chip" style="background: var(--green)">BUILD</span>
     <span class="vs">vs.</span>
+    <span class="chip" style="background: var(--gold)">REFRESH</span>
+    <span class="vs">vs.</span>
     <span class="chip" style="background: var(--blue)">ASK</span>
     <span class="vs">vs.</span>
     <span class="chip" style="background: var(--purple)">VERIFY</span>
@@ -191,22 +195,72 @@
       </div>
 
       <div class="metrics">
-        <div class="metric"><span class="mk">Games</span><span class="mv"><b>1,912</b> — every one</span></div>
-        <div class="metric"><span class="mk">Seasons</span><span class="mv"><b>22</b> (2003–2025)</span></div>
-        <div class="metric"><span class="mk">Storage</span><span class="mv"><b>299 KB</b> of 5 GB</span></div>
+        <div class="metric"><span class="mk">Games</span><span class="mv"><b>1,982</b> — every one</span></div>
+        <div class="metric"><span class="mk">Seasons</span><span class="mv"><b>23</b> (2003–2026)</span></div>
+        <div class="metric"><span class="mk">Storage</span><span class="mv"><b>~300 KB</b> of 5 GB</span></div>
+      </div>
+    </div>
+
+    <!-- ============ REFRESH ============ -->
+    <div class="col a">
+      <h2>Refresh</h2>
+      <p class="when">Nightly, 10:00 UTC — no laptop involved</p>
+
+      <div class="node">
+        <span class="pill">Cron trigger</span>
+        <div class="card">
+          <span class="ico">⏰</span>
+          <div class="cap">The platform calls <b>scheduled()</b> — no request, no visitor</div>
+        </div>
+      </div>
+
+      <div class="arr"><span class="ln"></span><span class="note">After every box score from the night before is final</span></div>
+
+      <div class="node">
+        <span class="pill">Worker · ingest.js</span>
+        <div class="card">
+          <span class="ico">🔄</span>
+          <div class="cap">Polls balldontlie from the <b>MAX(date)</b> watermark, per season</div>
+        </div>
+      </div>
+
+      <div class="arr"><span class="ln"></span><span class="note">DNP rows filtered — 0 floor seconds is not a game played</span></div>
+
+      <div class="node">
+        <span class="pill n-green">D1 upsert</span>
+        <div class="card n-green">
+          <span class="ico">🗄️</span>
+          <div class="cap"><b>seasons first</b> (FK parent), then games, then provenance</div>
+        </div>
+      </div>
+
+      <div class="arr"><span class="ln"></span><span class="note">The homepage kicker counts the live table next morning</span></div>
+
+      <div class="node">
+        <span class="pill">Idempotent</span>
+        <div class="card">
+          <span class="ico">♻️</span>
+          <div class="cap">A re-run finds nothing new. Offseason runs cost only the poll</div>
+        </div>
+      </div>
+
+      <div class="metrics">
+        <div class="metric"><span class="mk">First run</span><span class="mv"><b>70 games</b> in 829ms</span></div>
+        <div class="metric"><span class="mk">Backfilled</span><span class="mv">all of <b>2025-26</b></span></div>
+        <div class="metric"><span class="mk">On demand</span><span class="mv">POST /api/ingest · key</span></div>
       </div>
     </div>
 
     <!-- ============ ASK ============ -->
     <div class="col b">
       <h2>Ask</h2>
-      <p class="when">Every question · ~1.2s cold, ~0.4s cached</p>
+      <p class="when">Every question · answer starts &lt;1s, streamed</p>
 
       <div class="node">
         <span class="pill">Client</span>
         <div class="card">
           <span class="ico">🌐</span>
-          <div class="cap">Browser sends a <b>Turnstile token</b> · scripts send an <b>API key</b></div>
+          <div class="cap"><b>Turnstile once per visit</b> — first pass mints a 2h session · scripts send an <b>API key</b> · the last 4 exchanges ride along, so follow-ups resolve</div>
         </div>
       </div>
 
@@ -216,11 +270,11 @@
         <span class="pill n-red">Worker · access.js</span>
         <div class="card n-red">
           <span class="ico">🛡️</span>
-          <div class="cap">Authorize, then validate the input</div>
+          <div class="cap">Authorize — <b>key → session → Turnstile</b> — then validate the input</div>
         </div>
       </div>
 
-      <div class="arr"><span class="ln"></span><span class="note">Schema + question. Repeats served from cache for 0 Neurons</span></div>
+      <div class="arr"><span class="ln"></span><span class="note">Schema + question + TODAY'S DATE — the model's own "now" is years stale. Repeats cached, 0 Neurons</span></div>
 
       <div class="node">
         <span class="pill n-orange">AI Gateway → Workers AI</span>
@@ -256,7 +310,7 @@
         <span class="pill n-orange">AI Gateway → Workers AI</span>
         <div class="card n-orange">
           <span class="ico">💬</span>
-          <div class="cap"><b>Rows → prose</b><br>llama-3.2-3b · 2.3 N</div>
+          <div class="cap"><b>Rows → prose</b>, streamed token-by-token<br>llama-4-scout-17b · dates &amp; team names formatted in code first</div>
         </div>
       </div>
 
@@ -266,7 +320,7 @@
         <span class="pill n-green">Answer</span>
         <div class="card n-green">
           <span class="ico">📊</span>
-          <div class="cap">Returned with <b>the SQL that ran</b> and <b>the rows</b> — the prose never appears alone</div>
+          <div class="cap">Streams in with <b>the SQL that ran</b>, <b>the rows</b>, and a <b>chart</b> when the rows have a shape — the prose never appears alone</div>
         </div>
       </div>
     </div>
@@ -280,7 +334,7 @@
         <span class="pill">eval/cases.js</span>
         <div class="card">
           <span class="ico">📋</span>
-          <div class="cap"><b>20 questions</b>, each paired with a query we wrote and trust</div>
+          <div class="cap"><b>26 questions</b>, each paired with a query we wrote and trust — incl. 4 follow-up cases that send history</div>
         </div>
       </div>
 
@@ -315,10 +369,10 @@
       </div>
 
       <div class="metrics">
-        <div class="metric"><span class="mk">Today</span><span class="mv"><b>20 / 20</b> passing</span></div>
-        <div class="metric"><span class="mk">qwen-32b</span><span class="mv"><b>20/20</b> · 33.2 N</span></div>
-        <div class="metric"><span class="mk">llama-3b</span><span class="mv"><b>14/20</b> · 2.3 N</span></div>
-        <div class="metric"><span class="mk">Cost / run</span><span class="mv"><b>~710</b> Neurons</span></div>
+        <div class="metric"><span class="mk">Today</span><span class="mv"><b>26 / 26</b> passing</span></div>
+        <div class="metric"><span class="mk">Regressions</span><span class="mv"><b>12</b> shipped bugs, locked</span></div>
+        <div class="metric"><span class="mk">SQL bake-off</span><span class="mv">qwen <b>20/20</b> · llama-3b 14/20</span></div>
+        <div class="metric"><span class="mk">Cost / run</span><span class="mv"><b>~920</b> Neurons</span></div>
       </div>
 
       <div class="metrics" style="margin-top: 9px;">
@@ -386,7 +440,7 @@
     <div class="exitband-lbl">Or the <b>Ask</b> path declines — six ways, and every one exists because something went wrong first</div>
     <div class="exits wide">
       <div class="exit"><div class="ei">🚫</div><div class="en">Not authorized</div><div class="ed">No Turnstile token, no valid key. Rejected before a single Neuron is spent.</div></div>
-      <div class="exit"><div class="ei">🤷</div><div class="en">Out of scope</div><div class="ed">Awards, salary, "who's the GOAT" — returns UNANSWERABLE, no query runs.</div></div>
+      <div class="exit"><div class="ei">🤷</div><div class="en">Out of scope</div><div class="ed">Awards, salary, 3-point stats, "who's the GOAT" — returns UNANSWERABLE, no query runs.</div></div>
       <div class="exit"><div class="ei">⛔</div><div class="en">Query rejected</div><div class="ed">Stacked statements, mutations, comment smuggling — refused with a reason.</div></div>
       <div class="exit"><div class="ei">❓</div><div class="en">No such column</div><div class="ed">A query against data we don't hold reads as "not in this database" — never as a number.</div></div>
       <div class="exit"><div class="ei">0️⃣</div><div class="en">Zero rows</div><div class="ed">Decided in code before any model call. Removes 22% of inference.</div></div>
@@ -394,7 +448,7 @@
     </div>
   </div>
 
-  <p class="foot">chalk.jermainebethune.com · github.com/jermainebethune/lebron-chalk-toss · Workers · Workers AI · D1 · Turnstile · AI Gateway · static assets</p>
+  <p class="foot">chalk.jermainebethune.com · github.com/jermainebethune/lebron-chalk-toss · Workers · Workers AI · D1 · Turnstile · AI Gateway · Cron Triggers · static assets</p>
 
 </body>
 </html>

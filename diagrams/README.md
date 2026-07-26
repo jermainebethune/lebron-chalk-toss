@@ -8,7 +8,7 @@ dependencies, no external assets. Open any file in a browser.
 | `01-original-design-sketch.html` | The **plan**, before anything was built — one model, a happy path, no refusals. Kept deliberately for contrast | artifact `68a50115` |
 | `02-architecture-walkthrough.html` | As-built, scrollable, with the full bug history | artifact `53599c28` |
 | `03-architecture-onepage.html` | One-page reference: build path, request path, verification band | Evernote, project note |
-| `04-build-ask-verify-observe.html` | ByteByteGo-style poster, four columns | Evernote, system design note |
+| `04-build-ask-verify-observe.html` | ByteByteGo-style poster, five columns (REFRESH joined 26 Jul 2026) | Evernote, system design note |
 | `05-what-is-a-worker.html` | Teaching diagram — server→Worker, isolates, how the page is produced, why the limits exist | Evernote, study note |
 | `06-where-everything-lives.html` | Storage and geography — code everywhere, data in Virginia, cached vs stored | Evernote, study note |
 
@@ -57,6 +57,7 @@ itself. Looking at two real examples changed nearly every decision.
 | Indigo / blue | Platform — Worker, routing, compute |
 | Red | Refusal — where it stops rather than guesses |
 | Purple | Client, or verification |
+| Gold | Scheduled data refresh — the cron lifecycle, no model and no laptop involved |
 
 **Orange never touches green.** That's the argument of the whole system, visible before you
 read a word: the model writes the query and describes the rows, and the only thing producing

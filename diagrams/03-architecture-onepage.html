@@ -26,7 +26,7 @@
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 30px 34px; width: 1400px; zoom: 0.82;
+    margin: 0; padding: 30px 34px; width: 1400px; zoom: 0.85;
     background: var(--ground); color: var(--ink);
     font-family: var(--body); line-height: 1.45;
   }
@@ -114,19 +114,32 @@
       <h1>The Chalk Toss — how a question becomes an answer</h1>
       <p class="sub">The model writes the query and describes the rows. Every number comes from D1 in between; it is never asked to recall one.</p>
     </div>
-    <span class="stamp">As built · 19 Jul 2026<br>Workers · Workers AI · D1 · Turnstile · AI Gateway</span>
+    <span class="stamp">As built · 26 Jul 2026<br>Workers · Workers AI · D1 · Turnstile · AI Gateway · Cron</span>
   </div>
 
   <div class="band">
-    <div class="bandlabel">Build path — runs once on a laptop. The API key lives here and never reaches production.</div>
+    <div class="bandlabel">Build path — full rebuilds, on a laptop. extract.mjs reads the key from ~/.balldontlie_key.</div>
     <div class="build">
       <div class="bstage"><div class="n">~/.balldontlie_key</div><div class="d">Local file, chmod 600, outside the repo</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">extract.mjs</div><div class="d">Pulls 22 seasons + 1,946 game logs</div></div>
+      <div class="bstage"><div class="n">extract.mjs</div><div class="d">Pulls every season + game log</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">seed.sql</div><div class="d">All 1,912 games, full stat line</div></div>
+      <div class="bstage"><div class="n">seed.sql</div><div class="d">Every game, full stat line</div></div>
       <span class="arrow">→</span>
       <div class="bstage"><div class="n">D1</div><div class="d">wrangler d1 execute --remote</div></div>
+    </div>
+  </div>
+
+  <div class="band">
+    <div class="bandlabel">Refresh path — nightly at 10:00 UTC, no laptop. BALLDONTLIE_KEY is a Worker secret; runs are idempotent.</div>
+    <div class="build">
+      <div class="bstage"><div class="n">Cron trigger</div><div class="d">Platform calls scheduled() — no request involved</div></div>
+      <span class="arrow">→</span>
+      <div class="bstage"><div class="n">ingest.js</div><div class="d">Polls from the MAX(date) watermark, per season</div></div>
+      <span class="arrow">→</span>
+      <div class="bstage"><div class="n">filter DNPs</div><div class="d">0 floor seconds is not a game played</div></div>
+      <span class="arrow">→</span>
+      <div class="bstage"><div class="n">D1 upsert</div><div class="d">seasons first (FK), then games, then provenance. First run: all 70 games of 2025-26 in 829ms</div></div>
     </div>
   </div>
 
@@ -138,21 +151,21 @@
         <span class="snum">1</span>
         <span class="swho">Browser</span>
         <span class="swhat">The question</span>
-        <span class="swhy">Two entry points: the custom domain for people, workers.dev for API clients.</span>
+        <span class="swhy">Custom domain for people, workers.dev for API clients. The last 4 exchanges ride along — follow-ups resolve against them.</span>
       </div>
 
       <div class="step" data-t="stop">
         <span class="snum">2</span>
         <span class="swho">Worker · access.js</span>
         <span class="swhat">Checks input + who's asking</span>
-        <span class="swhy">Turnstile token, or an x-api-key header. Checked before any inference — this is the line where spending starts.</span>
+        <span class="swhy">API key → 2h session → Turnstile, in that order. The first Turnstile pass mints the session — one challenge per visit. Checked before any inference; this is the line where spending starts.</span>
       </div>
 
       <div class="step" data-t="ai">
         <span class="snum">3</span>
         <span class="swho">AI Gateway → Workers AI</span>
         <span class="swhat">Writes SQL</span>
-        <span class="swhy">qwen2.5-coder-32b, temperature 0. Asked for a statement — never an answer. Repeat questions served from cache for 0 Neurons.</span>
+        <span class="swhy">qwen2.5-coder-32b, temp 0. Prompt carries today's date + latest season — the model's own "now" is years stale. Repeats served from cache for 0 Neurons.</span>
       </div>
 
       <div class="step" data-t="stop">
@@ -173,14 +186,14 @@
         <span class="snum">6</span>
         <span class="swho">AI Gateway → Workers AI</span>
         <span class="swhat">Describes the rows</span>
-        <span class="swhy">llama-3.2-3b. Only ever sees a non-empty result set, so it has nothing to get wrong.</span>
+        <span class="swhy">llama-4-scout-17b, streamed token-by-token. Dates and team names are formatted in code first, so it copies — never converts.</span>
       </div>
 
       <div class="step" data-t="data">
         <span class="snum">7</span>
         <span class="swho">Browser</span>
-        <span class="swhat">Answer + query + rows</span>
-        <span class="swhy">The prose never appears alone. The reader can always check it against its source.</span>
+        <span class="swhat">Answer + query + rows + chart</span>
+        <span class="swhy">Streams in as it is written. The prose never appears alone — the reader can always check it against its source.</span>
       </div>
 
     </div>
@@ -193,7 +206,7 @@
       </div>
       <div class="ref">
         <div class="rt">↓ Refusal 1 · out of scope</div>
-        <div class="rb">Awards, salary, "who's the GOAT" — returns UNANSWERABLE, no query runs.</div>
+        <div class="rb">Awards, salary, 3-point stats, "who's the GOAT" — returns UNANSWERABLE, no query runs.</div>
       </div>
       <div class="ref">
         <div class="rt">↓ Refusal 2 · query rejected</div>
@@ -219,7 +232,7 @@
   </div>
 
   <div class="band">
-    <div class="bandlabel">Verification — npm run eval, 20 cases, ~710 Neurons a run</div>
+    <div class="bandlabel">Verification — npm run eval, 26 cases (incl. 4 follow-up cases), ~920 Neurons a run</div>
     <div class="build">
       <div class="bstage"><div class="n">eval/cases.js</div><div class="d">Each question paired with a query we wrote and trust</div></div>
       <span class="arrow">→</span>
@@ -227,7 +240,7 @@
       <span class="arrow">→</span>
       <div class="bstage"><div class="n">/api/ask (skipCache)</div><div class="d">Bypasses the cache, or it would test the cache not the model</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">compare RESULTS</div><div class="d">Not SQL text — many correct queries exist. 20/20 today</div></div>
+      <div class="bstage"><div class="n">compare RESULTS</div><div class="d">Not SQL text — many correct queries exist. 26/26 today</div></div>
     </div>
   </div>
 
@@ -237,9 +250,10 @@
       <h3>What each Cloudflare product does here</h3>
       <div class="kv"><span class="k">Workers</span><span class="v">Runs all the code — routing, validation, the page itself</span></div>
       <div class="kv"><span class="k">Workers AI</span><span class="v">The two model calls, on the same platform</span></div>
-      <div class="kv"><span class="k">D1</span><span class="v">The database. seasons · games (1,912) · data_provenance</span></div>
+      <div class="kv"><span class="k">D1</span><span class="v">The database. seasons (23) · games (1,982) · data_provenance</span></div>
+      <div class="kv"><span class="k">Cron Triggers</span><span class="v">Wakes the Worker nightly — the data keeps itself current</span></div>
       <div class="kv"><span class="k">DNS + custom domain</span><span class="v">Puts it on chalk.jermainebethune.com</span></div>
-      <div class="kv"><span class="k">Turnstile</span><span class="v">Proves a human asked, before spending a Neuron</span></div>
+      <div class="kv"><span class="k">Turnstile</span><span class="v">Proves a human asked — once per visit (2h session)</span></div>
       <div class="kv"><span class="k">AI Gateway</span><span class="v">Caches, logs and meters every inference</span></div>
       <div class="kv"><span class="k">deploy.sh</span><span class="v">Emails on deploy — no native Worker alert exists</span></div>
       <div class="kv"><span class="k">Static assets</span><span class="v">Serves the photographs from ./public</span></div>
@@ -248,9 +262,9 @@
 
     <div class="box">
       <h3>Measured cost per question</h3>
-      <div class="kv"><span class="k">qwen2.5-coder-32b</span><span class="v"><b>33.2</b> Neurons — writes SQL</span></div>
-      <div class="kv"><span class="k">llama-3.2-3b</span><span class="v"><b>2.3</b> Neurons — writes prose</span></div>
-      <div class="kv"><span class="k">total, cold</span><span class="v"><b>~35.5</b> Neurons · ~1.2s</span></div>
+      <div class="kv"><span class="k">qwen2.5-coder-32b</span><span class="v"><b>33.2</b> Neurons — writes SQL, 94% of spend</span></div>
+      <div class="kv"><span class="k">llama-4-scout-17b</span><span class="v">writes prose, streamed — a rounding error next to the SQL call</span></div>
+      <div class="kv"><span class="k">total, cold</span><span class="v"><b>~36</b> Neurons · answer starts &lt;1s</span></div>
       <div class="kv"><span class="k">repeat question</span><span class="v"><b>0</b> Neurons · ~0.4s (gateway cache)</span></div>
       <div class="kv"><span class="k">free allowance</span><span class="v"><b>10,000</b>/day — repeats are free</span></div>
     </div>
@@ -269,7 +283,7 @@
 
   <div class="thesis">
     <p class="t1">Grounding a model in a datastore prevents invented numbers. It does not prevent a wrong query from producing a confidently wrong answer.</p>
-    <p class="t2">"How many MVPs did he win?" once returned <b>0</b> — the awards column existed but was empty, so the query succeeded and produced a real, meaningless figure. An empty column is more dangerous than a missing one, because an empty column answers. That is why five of the seven steps can refuse.</p>
+    <p class="t2">"How many MVPs?" once returned <b>0</b> — an empty column answers. "Best 3-point season?" answered with overall FG% — a neighbouring column answers. "This past season?" queried 2022-23 — a stale sense of time answers. All real numbers, all confidently wrong; the fix each time was taking the decision away from the model. That is why five of the seven steps can refuse.</p>
   </div>
 
   <div class="foot">chalk.jermainebethune.com · github.com/jermainebethune/lebron-chalk-toss · cost measured via GraphQL aiInferenceAdaptiveGroups</div>
