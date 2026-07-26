@@ -105,10 +105,30 @@ function prettyDate(iso) {
   return `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${day}${suffix}, ${iso.slice(0, 4)}`;
 }
 
+// Team codes get the same treatment as dates: spelled out in code so the
+// model copies a name instead of recalling one. Value-based (any cell whose
+// value is exactly a known code) so it survives whatever alias the SQL model
+// gives the column. The set matches DISTINCT team/opponent in the database —
+// balldontlie maps historical games to current franchises, so 30 is complete.
+const TEAM_NAMES = {
+  ATL: 'Atlanta Hawks', BKN: 'Brooklyn Nets', BOS: 'Boston Celtics',
+  CHA: 'Charlotte Hornets', CHI: 'Chicago Bulls', CLE: 'Cleveland Cavaliers',
+  DAL: 'Dallas Mavericks', DEN: 'Denver Nuggets', DET: 'Detroit Pistons',
+  GSW: 'Golden State Warriors', HOU: 'Houston Rockets', IND: 'Indiana Pacers',
+  LAC: 'LA Clippers', LAL: 'Los Angeles Lakers', MEM: 'Memphis Grizzlies',
+  MIA: 'Miami Heat', MIL: 'Milwaukee Bucks', MIN: 'Minnesota Timberwolves',
+  NOP: 'New Orleans Pelicans', NYK: 'New York Knicks', OKC: 'Oklahoma City Thunder',
+  ORL: 'Orlando Magic', PHI: 'Philadelphia 76ers', PHX: 'Phoenix Suns',
+  POR: 'Portland Trail Blazers', SAC: 'Sacramento Kings', SAS: 'San Antonio Spurs',
+  TOR: 'Toronto Raptors', UTA: 'Utah Jazz', WAS: 'Washington Wizards',
+};
+
 function prettyRows(rows) {
-  return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) =>
-    [k, typeof v === 'string' && ISO_DATE.test(v) ? prettyDate(v) : v]
-  )));
+  return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => {
+    if (typeof v !== 'string') return [k, v];
+    if (ISO_DATE.test(v)) return [k, prettyDate(v)];
+    return [k, TEAM_NAMES[v] ?? v];
+  })));
 }
 
 export function prosePrompt(question, sql, rows, truncated = false) {
@@ -129,6 +149,7 @@ Absolute rules:
 - If there are more than 10 rows: NEVER walk through them one by one. State the count first ("There are N ..."), then describe at most the two or three most notable rows using their actual values — with their date and opponent when those columns exist. The reader has the full table below your answer.
 - With 10 or fewer rows, do NOT announce how many there are — no "There is 1 season." Just answer the question directly.
 - Dates in the rows are already written out. Copy them character-for-character, KEEPING the ordinal: write "April 6th, 2018", never "April 6, 2018" and never "2018-04-06".
+- Team names in the rows are already spelled out. Use the full name exactly as given — "Chicago Bulls", never "CHI" or "the CHI team". Prefer the row's full name even when the question used a nickname: asked about "Philly", answer with "the Philadelphia 76ers".
 - If the rows are marked CAPPED, do not state a total count — the list is incomplete. Describe what is shown without implying it is all of them.
 - No preamble. No "Based on the data". Just the answer.`,
     },

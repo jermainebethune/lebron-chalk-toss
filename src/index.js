@@ -14,7 +14,13 @@ import { ingest } from './ingest.js';
 // Response envelopes vary across model families — see textOf() below, which
 // normalizes them so swapping either model here doesn't break the caller.
 const SQL_MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct';
-const PROSE_MODEL = '@cf/meta/llama-3.2-3b-instruct';
+// 3.2-3b wrote fine prose until the rule list grew (full team names over
+// nicknames, ordinal dates, count-vs-describe) — then it started dropping
+// rows and mirroring nicknames. Prose is ~6% of per-question cost, so a
+// mid-size upgrade is a rounding error next to the SQL call. llama-3.1-8b
+// was the first choice but is deprecated (runtime 5028) — probed the
+// catalog and Scout is the smallest current model that follows the rules.
+const PROSE_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
 // Every inference goes through AI Gateway: caching, request logs, and per-model
 // analytics for free. Both prompts are self-invalidating — the SQL prompt
