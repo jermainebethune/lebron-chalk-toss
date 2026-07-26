@@ -5,7 +5,9 @@
  * Run:  node extract.mjs > seed.sql
  *
  * Reads the API key from ~/.balldontlie_key so it never lands in the repo.
- * The key is only needed here — the deployed Worker reads D1 and nothing else.
+ * The Worker holds the same key as the BALLDONTLIE_KEY secret — its nightly
+ * ingestion (src/ingest.js) appends new games; this script remains the way to
+ * rebuild the seed from scratch.
  *
  * Two tables come out:
  *   seasons — one row per season, from /season_averages (authoritative totals)

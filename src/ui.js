@@ -14,8 +14,15 @@
 //
 // Served inline so the Worker has no template dependency. Photos come from
 // /img/ via the static assets binding.
+//
+// page() takes the live { seasons, games } counts so the kicker reflects what
+// ingestion has actually loaded; the hardcoded numbers are only the fallback
+// for a failed count query, so the page never renders with a hole in it.
 
-export const page = `<!doctype html>
+export function page(counts) {
+  const seasons = counts?.seasons || 22;
+  const games = Number(counts?.games || 1912).toLocaleString('en-US');
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -358,7 +365,7 @@ export const page = `<!doctype html>
   </div>
 
   <div class="intro">
-    <p class="kicker">22 seasons · 1,912 games · every one of them</p>
+    <p class="kicker">${seasons} seasons · ${games} games · every one of them</p>
     <h1>The Chalk<span class="toss">Toss</span></h1>
     <p class="lede">Ask anything about LeBron's career. The model writes a query &mdash; <b>every number comes back from the record</b>, not from the model's memory.</p>
 
@@ -435,6 +442,28 @@ function currentToken() {
 }
 function resetToken() {
   try { if (widgetId !== null) turnstile.reset(widgetId); } catch (e) {}
+}
+
+// One challenge per visit, not per question. The first verified ask returns a
+// short-lived session token; while we hold one, questions skip Turnstile and
+// the widget is hidden. If the server rejects it (expired, IP changed), we
+// drop it and quietly verify once more.
+let session = null;
+try { session = sessionStorage.getItem('ct-session'); } catch (e) {}
+
+function syncWidget() {
+  document.getElementById('turnstile-anchor').style.display = session ? 'none' : '';
+}
+function saveSession(s) {
+  session = s;
+  try { sessionStorage.setItem('ct-session', s); } catch (e) {}
+  syncWidget();
+}
+function dropSession() {
+  session = null;
+  try { sessionStorage.removeItem('ct-session'); } catch (e) {}
+  resetToken();
+  syncWidget();
 }
 
 // ------------------------------------------------------------- chalk burst
@@ -768,13 +797,14 @@ function resultHtml(data) {
   return html;
 }
 
-async function ask(question) {
-  const token = currentToken();
-  if (!token) {
+async function ask(question, isRetry) {
+  const token = session ? null : currentToken();
+  if (!session && !token) {
     appendExchange(slab('wait', 'One moment',
       '<p class="text">Verification is still clearing &mdash; give it a second and ask again.</p>'), true);
     return;
   }
+  const usedSession = !!session;
 
   // Chalk goes up from the button as the question goes out.
   const r = go.getBoundingClientRect();
@@ -793,6 +823,7 @@ async function ask(question) {
   // repeats while the answer is being written, "result" replaces both for
   // answers that were decided in code.
   const handle = (ev) => {
+    if (ev.session) saveSession(ev.session);
     if (ev.type === 'meta') {
       showCredit(ev.provenance);
       sql = ev.sql;
@@ -826,15 +857,28 @@ async function ask(question) {
     const res = await fetch('/api/ask', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ question, turnstileToken: token, history: history.slice(), stream: true })
+      body: JSON.stringify(Object.assign(
+        { question, history: history.slice(), stream: true },
+        usedSession ? { sessionToken: session } : { turnstileToken: token }
+      ))
     });
-    resetToken();
+    // Only a spent Turnstile token needs a reset — session asks never touch it.
+    if (!usedSession) resetToken();
 
     // Auth and validation failures are decided before the stream opens, so
     // they still arrive as ordinary JSON.
     const ctype = res.headers.get('content-type') || '';
     if (ctype.indexOf('text/event-stream') === -1) {
       const data = await res.json().catch(() => ({}));
+      // An expired session isn't the user's problem: drop it, take this
+      // exchange back off the page, and re-ask through Turnstile once.
+      if (res.status === 401 && usedSession && !isRetry) {
+        dropSession();
+        ex.remove();
+        syncClear();
+        queueMicrotask(() => ask(question, true));
+        return;
+      }
       wait.remove();
       ex.insertAdjacentHTML('beforeend', errorHtml(data));
       bringIntoView(ex);
@@ -907,8 +951,10 @@ clearBtn.addEventListener('click', () => {
 });
 
 syncClear();
+syncWidget();
 
 fetch('/api/health').then(r => r.json()).then(d => showCredit(d.provenance)).catch(() => {});
 </script>
 </body>
 </html>`;
+}

@@ -22,6 +22,12 @@
   "assets": {
     "directory": "./public"
   },
+  // Nightly ingestion: poll balldontlie for new games and load them into D1.
+  // 10:00 UTC = 5-6am Eastern, after every box score from the night before is
+  // final. Offseason runs find nothing and cost nothing but the poll.
+  "triggers": {
+    "crons": ["0 10 * * *"]
+  },
   "ai": {
     "binding": "AI"
   },

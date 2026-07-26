@@ -39,6 +39,22 @@ question → Worker → authorize ──→ AI Gateway → Workers AI (writes SQ
         answer ←── AI Gateway → Workers AI (describes rows) ←┘
 ```
 
+## Keeping the data current
+
+A cron trigger (10:00 UTC daily — after every box score from the night before is final)
+runs `src/ingest.js`: it polls balldontlie for games newer than `MAX(games.date)`, filters
+out DNP rows (0 minutes on the floor is not a game played), inserts what's new, upserts the
+affected season rows from `/season_averages`, and stamps `data_provenance`. The page's
+kicker line counts the live table, so a night's ingestion is visible the next morning.
+
+The watermark is polled per-season from where it falls through the current season, so a
+database that has been stale for months backfills whole missed seasons — its first
+production run loaded the entire 2025-26 season (70 games) in under a second. Runs are
+idempotent; offseason runs find nothing and cost nothing but the poll.
+
+`POST /api/ingest` (API key only) runs the same code path on demand. The balldontlie key
+lives as the `BALLDONTLIE_KEY` Worker secret.
+
 ## Running it
 
 ```bash
@@ -188,6 +204,12 @@ Two ways in now, checked **before any inference runs**:
 Both secrets live as Worker secrets (`wrangler secret put`), never in the repo. The check
 fails closed: if a secret isn't configured, that path is simply unavailable rather than
 silently open.
+
+Turnstile tokens are single-use, which originally meant the widget re-challenged the same
+human before every question. Now the first successful verification mints a **session
+token** — two hours, HMAC-signed with the Turnstile secret, bound to the caller's IP —
+which rides back on the answer and replaces the widget for the rest of the visit. An
+expired or moved session falls back to one silent re-verification.
 
 ```bash
 curl -X POST https://chalk-toss.jermaine-e7a.workers.dev/api/ask \

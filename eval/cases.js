@@ -126,7 +126,60 @@ export const cases = [
     truth: `SELECT COUNT(*) AS n FROM games WHERE points >= 40 AND home = 1`,
   },
 
+  // ----------------------------------------------------------- follow-ups
+  // These send `history` — prior exchanges — and test that the SQL model
+  // resolves a conversational question against them. The dangerous failure
+  // modes: dropping the carried conditions, or carrying them into a fresh
+  // question that should have none.
+  {
+    id: 'followup-carries-conditions',
+    ask: 'What about only the playoffs?',
+    history: [{
+      question: 'When did he score 40 or more against Boston?',
+      sql: `SELECT date, opponent, points FROM games WHERE opponent = 'BOS' AND points >= 40`,
+    }],
+    truth: `SELECT date, points FROM games WHERE opponent = 'BOS' AND points >= 40 AND playoff = 1 ORDER BY date`,
+    note: 'must keep opponent AND threshold from the prior turn while adding playoff = 1',
+  },
+  {
+    id: 'followup-swaps-stat',
+    ask: 'What about rebounds?',
+    history: [{
+      question: 'How many points per game did he average each season?',
+      sql: 'SELECT season, ppg FROM seasons',
+    }],
+    truth: `SELECT season, rpg FROM seasons ORDER BY season`,
+    note: 'same shape as the prior turn, different stat',
+  },
+  {
+    id: 'followup-swaps-opponent',
+    ask: 'And against Golden State?',
+    history: [{
+      question: 'When did he score 40 or more against Boston?',
+      sql: `SELECT date, opponent, points FROM games WHERE opponent = 'BOS' AND points >= 40`,
+    }],
+    truth: `SELECT date, points FROM games WHERE opponent = 'GSW' AND points >= 40 ORDER BY date`,
+    note: 'replaces the opponent, keeps the threshold',
+  },
+  {
+    id: 'followup-fresh-question',
+    ask: 'What was his career high?',
+    history: [{
+      question: 'When did he score 40 or more against Boston?',
+      sql: `SELECT date, opponent, points FROM games WHERE opponent = 'BOS' AND points >= 40`,
+    }],
+    truth: `SELECT MAX(points) AS high FROM games`,
+    note: 'a complete question must NOT inherit the Boston filter from history',
+  },
+
   // ------------------------------------------------------------- must refuse
+  {
+    id: 'three-point-refused',
+    tag: 'regression',
+    ask: 'What was his best 3-point percentage season?',
+    refuses: true,
+    note: 'bug 11 — answered with OVERALL fg_pct as if it were a 3-point stat. There is no three-point data; substituting a different stat is a confidently wrong answer.',
+  },
   {
     id: 'salary-refused',
     ask: 'What is his salary?',

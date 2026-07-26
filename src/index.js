@@ -1,7 +1,8 @@
 import { guard, SqlRejected, MAX_LIMIT } from './guard.js';
 import { sqlPrompt, prosePrompt } from './prompts.js';
-import { authorize } from './access.js';
+import { authorize, mintSession } from './access.js';
 import { page } from './ui.js';
+import { ingest } from './ingest.js';
 
 // Two jobs, two models, chosen for what each job actually needs.
 //
@@ -232,7 +233,7 @@ async function ask(question, history, env, skipCache = false) {
  * long gone — so they travel as an `error` event and the client renders them
  * exactly as it renders a non-2xx JSON body.
  */
-function askStream(question, history, env, skipCache = false) {
+function askStream(question, history, env, skipCache = false, session = null) {
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -241,12 +242,12 @@ function askStream(question, history, env, skipCache = false) {
       try {
         const r = await resolve(question, history, env, skipCache);
         if (r.done) {
-          send({ type: 'result', ...r.done });
+          send({ type: 'result', ...r.done, ...(session ? { session } : {}) });
           send({ type: 'done' });
           return;
         }
 
-        send({ type: 'meta', sql: r.sql, rows: r.rows, truncated: r.truncated, provenance: r.provenance });
+        send({ type: 'meta', sql: r.sql, rows: r.rows, truncated: r.truncated, provenance: r.provenance, ...(session ? { session } : {}) });
 
         const ai = await infer(env, PROSE_MODEL, {
           messages: prosePrompt(question, r.sql, r.rows, r.truncated),
@@ -309,9 +310,41 @@ export default {
     const url = new URL(request.url);
 
     if (url.pathname === '/') {
-      return new Response(page, {
+      // The kicker line counts what is actually in the database, so a night's
+      // ingestion is visible on the page the next morning. If the query fails
+      // the page still renders — page() falls back to the last known numbers.
+      let counts = null;
+      try {
+        counts = await env.DB.prepare(
+          'SELECT COUNT(*) AS games, COUNT(DISTINCT season) AS seasons FROM games'
+        ).first();
+      } catch (e) {
+        console.warn('count query failed, serving fallback kicker', e?.message);
+      }
+      return new Response(page(counts), {
         headers: { 'content-type': 'text/html; charset=utf-8' },
       });
+    }
+
+    // Manual ingestion trigger — same code path the cron runs, for testing
+    // and catch-up. API key only: it makes outbound API calls on our key.
+    if (url.pathname === '/api/ingest') {
+      if (request.method !== 'POST') {
+        return json({ error: 'Send a POST.' }, 405);
+      }
+      const allowed = await authorize(request, {}, env);
+      if (!allowed.ok || allowed.via !== 'api-key') {
+        return json({ error: 'API key required.' }, 401);
+      }
+      if (!env.BALLDONTLIE_KEY) {
+        return json({ error: 'BALLDONTLIE_KEY is not configured.' }, 500);
+      }
+      try {
+        return json(await ingest(env));
+      } catch (err) {
+        console.error('ingest failed', err);
+        return json({ error: `Ingest failed: ${err.message}` }, 500);
+      }
     }
 
     if (url.pathname === '/api/ask') {
@@ -349,16 +382,25 @@ export default {
 
       const history = cleanHistory(payload?.history);
 
+      // A fresh Turnstile pass earns a session token so the next questions
+      // skip the widget entirely. It rides back on the answer (meta/result
+      // event when streaming, a field when JSON).
+      const session = allowed.via === 'turnstile' && env.TURNSTILE_SECRET
+        ? await mintSession(env, request.headers.get('cf-connecting-ip'))
+        : null;
+
       // stream: true switches the response to server-sent events. Auth and
       // validation failures above still return JSON — the stream only begins
       // once the question is actually going to run, so the client can treat
       // "content-type: application/json" as the error path.
       if (payload?.stream === true) {
-        return askStream(question.trim(), history, env, skipCache);
+        return askStream(question.trim(), history, env, skipCache, session);
       }
 
       try {
-        return json(await ask(question.trim(), history, env, skipCache));
+        const result = await ask(question.trim(), history, env, skipCache);
+        if (session) result.session = session;
+        return json(result);
       } catch (err) {
         if (err instanceof SqlRejected) {
           // The guard did its job. Say so plainly rather than letting the model
@@ -381,5 +423,15 @@ export default {
     }
 
     return json({ error: 'Not found' }, 404);
+  },
+
+  // The nightly poll. 10:00 UTC is 5-6am Eastern — every game from the night
+  // before has a final box score by then, including West Coast overtimes.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(
+      ingest(env)
+        .then((s) => console.log('ingest', JSON.stringify(s)))
+        .catch((err) => console.error('ingest failed', err))
+    );
   },
 };

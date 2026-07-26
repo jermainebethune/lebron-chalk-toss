@@ -18,10 +18,18 @@
 
 const VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
+// Turnstile tokens are single-use, so verifying per question meant the widget
+// re-challenged the same human on every ask — a checkbox between every
+// follow-up. Instead, the FIRST successful verification mints a short-lived
+// session token (HMAC-signed, bound to the caller's IP) and later questions
+// present that. One human, one challenge, a conversation's worth of questions.
+const SESSION_TTL_S = 2 * 60 * 60;
+
 export const DENIED = {
   NO_PROOF: 'Send a Turnstile token or an x-api-key header.',
   BAD_TOKEN: 'That Turnstile token was not accepted.',
   BAD_KEY: 'That API key is not valid.',
+  BAD_SESSION: 'Session expired.',
 };
 
 /**
@@ -35,6 +43,33 @@ function safeEqual(a, b) {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+async function hmacHex(secret, message) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Signed with TURNSTILE_SECRET — a secret we already hold and rotate with the
+ * widget, so no new secret to manage. Bound to the caller's IP: a leaked token
+ * is useless elsewhere, and an IP change mid-session just re-verifies once.
+ */
+export async function mintSession(env, ip) {
+  const exp = Math.floor(Date.now() / 1000) + SESSION_TTL_S;
+  return `${exp}.${await hmacHex(env.TURNSTILE_SECRET, `session:${exp}:${ip ?? ''}`)}`;
+}
+
+async function verifySession(env, token, ip) {
+  if (typeof token !== 'string' || token.length > 100) return false;
+  const [expStr, sig] = token.split('.');
+  const exp = Number(expStr);
+  if (!Number.isFinite(exp) || exp < Date.now() / 1000) return false;
+  return safeEqual(sig, await hmacHex(env.TURNSTILE_SECRET, `session:${exp}:${ip ?? ''}`));
 }
 
 async function verifyTurnstile(token, secret, ip) {
@@ -60,6 +95,16 @@ export async function authorize(request, body, env) {
   if (key) {
     if (env.API_KEY && safeEqual(key, env.API_KEY)) return { ok: true, via: 'api-key' };
     return { ok: false, reason: DENIED.BAD_KEY };
+  }
+
+  if (body?.sessionToken) {
+    const ip = request.headers.get('cf-connecting-ip');
+    if (env.TURNSTILE_SECRET && await verifySession(env, body.sessionToken, ip)) {
+      return { ok: true, via: 'session' };
+    }
+    // Expired or invalid — tell the client plainly so it can fall back to a
+    // fresh Turnstile pass instead of showing the user an opaque failure.
+    return { ok: false, reason: DENIED.BAD_SESSION };
   }
 
   const token = body?.turnstileToken;

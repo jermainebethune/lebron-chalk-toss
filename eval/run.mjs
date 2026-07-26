@@ -51,12 +51,12 @@ async function truthOf(sql) {
   return parsed[0]?.results ?? [];
 }
 
-/** What the app actually answers. */
-async function askApp(question) {
+/** What the app actually answers. `history` exercises follow-up resolution. */
+async function askApp(question, history) {
   const res = await fetch(`${API}/api/ask`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-api-key': KEY },
-    body: JSON.stringify({ question, skipCache: true }),
+    body: JSON.stringify({ question, skipCache: true, ...(history ? { history } : {}) }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -114,7 +114,7 @@ function compare(truth, actual) {
 }
 
 async function runCase(c) {
-  const res = await askApp(c.ask);
+  const res = await askApp(c.ask, c.history);
   const refused = res.sql === null;
 
   if (c.refuses) {
