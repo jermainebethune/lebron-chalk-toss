@@ -598,6 +598,25 @@ function niceStep(rough) {
 const fmtVal = (v, pct) =>
   (Number.isInteger(v) ? String(v) : v.toFixed(1)) + (pct ? '%' : '');
 
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const shortDate = (iso) =>
+  MONTHS_SHORT[Number(iso.slice(5, 7)) - 1] + ' ' + Number(iso.slice(8, 10)) + ', ' + iso.slice(0, 4);
+
+// Mirrors the server-side map in prompts.js — tooltips mention teams, and a
+// mentioned team gets its full name, same as the prose.
+const TEAM_NAMES = {
+  ATL: 'Atlanta Hawks', BKN: 'Brooklyn Nets', BOS: 'Boston Celtics',
+  CHA: 'Charlotte Hornets', CHI: 'Chicago Bulls', CLE: 'Cleveland Cavaliers',
+  DAL: 'Dallas Mavericks', DEN: 'Denver Nuggets', DET: 'Detroit Pistons',
+  GSW: 'Golden State Warriors', HOU: 'Houston Rockets', IND: 'Indiana Pacers',
+  LAC: 'LA Clippers', LAL: 'Los Angeles Lakers', MEM: 'Memphis Grizzlies',
+  MIA: 'Miami Heat', MIL: 'Milwaukee Bucks', MIN: 'Minnesota Timberwolves',
+  NOP: 'New Orleans Pelicans', NYK: 'New York Knicks', OKC: 'Oklahoma City Thunder',
+  ORL: 'Orlando Magic', PHI: 'Philadelphia 76ers', PHX: 'Phoenix Suns',
+  POR: 'Portland Trail Blazers', SAC: 'Sacramento Kings', SAS: 'San Antonio Spurs',
+  TOR: 'Toronto Raptors', UTA: 'Utah Jazz', WAS: 'Washington Wizards',
+};
+
 function chartOf(rows) {
   if (!Array.isArray(rows) || rows.length < 3) return '';
   const cols = Object.keys(rows[0]);
@@ -676,22 +695,49 @@ function chartOf(rows) {
   g += '<text class="c-val" x="' + centers[peak] + '" y="' + (y(values[peak]) - 8) +
     '" text-anchor="' + anchor + '">' + fmtVal(values[peak], pct) + '</text>';
 
-  const every = Math.max(1, Math.ceil(n / 6));
-  for (let i = 0; i < n; i++) {
-    if (i !== 0 && i !== n - 1 && i % every) continue;
-    if (i !== 0 && i !== n - 1 && n - 1 - i < every) continue; // don't crowd the last label
-    const short = labelCol === 'date' ? labels[i].slice(0, 7) : labels[i];
-    const a = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
-    g += '<text class="c-axis" x="' + centers[i] + '" y="' + (CH - 9) + '" text-anchor="' + a + '">' + esc(short) + '</text>';
+  // The x axis must say what is true. Bars are spaced by position in the
+  // list, NOT by time — so a game-log axis gets year markers where each
+  // year's games begin ("these bars are 2006, these are 2018"), never
+  // date labels that would imply a time scale that isn't there.
+  const asc = labels.every((l, i) => !i || l >= labels[i - 1]);
+  if (labelCol === 'date' && asc) {
+    let lastX = -Infinity, lastYear = '';
+    for (let i = 0; i < n; i++) {
+      const year = labels[i].slice(0, 4);
+      if (year === lastYear) continue;
+      lastYear = year;
+      if (centers[i] - lastX < 55) continue; // collision guard
+      lastX = centers[i];
+      g += '<text class="c-axis" x="' + centers[i] + '" y="' + (CH - 9) + '" text-anchor="middle">' + year + '</text>';
+    }
+  } else {
+    const every = Math.max(1, Math.ceil(n / 6));
+    for (let i = 0; i < n; i++) {
+      if (i !== 0 && i !== n - 1 && i % every) continue;
+      if (i !== 0 && i !== n - 1 && n - 1 - i < every) continue; // don't crowd the last label
+      const short = labelCol === 'date' ? labels[i].slice(0, 7) : labels[i];
+      const a = i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
+      g += '<text class="c-axis" x="' + centers[i] + '" y="' + (CH - 9) + '" text-anchor="' + a + '">' + esc(short) + '</text>';
+    }
   }
 
+  // Tooltip names the game, not just the number: "Apr 22, 2006 vs WAS".
+  const tips = rows.map((r, i) => {
+    if (labelCol !== 'date') return labels[i];
+    let t = shortDate(labels[i]);
+    if (typeof r.opponent === 'string') t += ' vs ' + (TEAM_NAMES[r.opponent] || r.opponent);
+    return t;
+  });
+
   const id = chartSeq++;
-  chartData[id] = { labels, values, pct, form, centers };
-  const title = valueCol.replace(/_/g, ' ') + ' by ' + labelCol;
+  chartData[id] = { tips, values, pct, form, centers };
+  const stat = valueCol.replace(/_/g, ' ');
+  const title = labelCol === 'date'
+    ? stat + ' in each game — ' + n + (asc ? ' games, oldest first' : ' games, in table order')
+    : stat + ' by ' + labelCol;
   return slab('chart', 'The shape of it &mdash; ' + esc(title),
     '<div class="chartwrap"><svg viewBox="0 0 ' + CW + ' ' + CH + '" data-ci="' + id +
-    '" role="img" aria-label="' + esc(title) + ', ' + n +
-    ' values; exact numbers in the table below">' + g + '</svg></div>');
+    '" role="img" aria-label="' + esc(title) + '; exact numbers in the table below">' + g + '</svg></div>');
 }
 
 // Hover: one delegated listener and one shared tooltip for every chart on the
@@ -739,7 +785,7 @@ document.addEventListener('pointermove', (e) => {
         xh.style.visibility = 'visible';
       }
     }
-    tip.innerHTML = esc(d.labels[idx]) + ' &middot; <b>' + fmtVal(d.values[idx], d.pct) + '</b>';
+    tip.innerHTML = esc(d.tips[idx]) + ' &middot; <b>' + fmtVal(d.values[idx], d.pct) + '</b>';
     tip.style.visibility = 'visible';
   }
   const left = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
