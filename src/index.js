@@ -132,9 +132,24 @@ function cleanHistory(raw) {
 async function resolve(question, history, env, skipCache = false) {
   const meta = await provenance(env);
 
+  // Temporal anchor for the SQL prompt: without today's date and the actual
+  // latest season, "last season" resolves against the model's training-era
+  // sense of now — it confidently hardcoded 2022-23 in production. The date
+  // in the prompt also rolls the AI Gateway cache daily, which is correct:
+  // "this season" is allowed to mean something new tomorrow.
+  let anchor = null;
+  try {
+    const latest = await env.DB.prepare('SELECT MAX(season) AS s FROM seasons').first();
+    if (latest?.s) {
+      anchor = { today: new Date().toISOString().slice(0, 10), latestSeason: latest.s };
+    }
+  } catch (e) {
+    console.warn('anchor query failed, prompting without one', e?.message);
+  }
+
   // 1. Question -> SQL
   const drafted = await infer(env, SQL_MODEL, {
-    messages: sqlPrompt(question, history),
+    messages: sqlPrompt(question, history, anchor),
     max_tokens: 300,
     temperature: 0,
   }, skipCache);

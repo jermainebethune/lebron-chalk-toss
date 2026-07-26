@@ -126,6 +126,14 @@ export const cases = [
     truth: `SELECT COUNT(*) AS n FROM games WHERE points >= 40 AND home = 1`,
   },
 
+  {
+    id: 'last-season-not-stale',
+    tag: 'regression',
+    ask: 'What was his highest scoring game this past season?',
+    truth: `SELECT MAX(points) AS high FROM games WHERE season = (SELECT MAX(season) FROM seasons)`,
+    note: 'bug 12 — "this past season" became WHERE season = \'2022-23\': the model resolved "now" against its training data. The prompt now carries today\'s date and the latest season in the database.',
+  },
+
   // ----------------------------------------------------------- follow-ups
   // These send `history` — prior exchanges — and test that the SQL model
   // resolves a conversational question against them. The dangerous failure

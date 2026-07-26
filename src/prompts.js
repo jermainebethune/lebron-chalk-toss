@@ -54,7 +54,17 @@ CREATE TABLE games (
  * Only exchanges that produced SQL are included — refusals carry no context
  * worth resolving against.
  */
-export function sqlPrompt(question, history = []) {
+/**
+ * anchor = { today: 'YYYY-MM-DD', latestSeason: '2025-26' } — queried live so
+ * the model can resolve "this season" / "last season" against reality. Without
+ * it, the model resolves temporal words against its TRAINING data's sense of
+ * now and hardcodes a years-old season. Found in production: "this past
+ * season" became WHERE season = '2022-23'.
+ */
+export function sqlPrompt(question, history = [], anchor = null) {
+  const anchorNote = anchor ? `
+Today's date is ${anchor.today}. The latest season in the database is ${anchor.latestSeason}, complete through the most recent game played.
+` : '';
   return [
     {
       role: 'system',
@@ -62,7 +72,7 @@ export function sqlPrompt(question, history = []) {
 
 Schema:
 ${SCHEMA}
-
+${anchorNote}
 Rules:
 - Reply with ONE SQLite SELECT statement and nothing else.
 - No explanation, no markdown fences, no trailing semicolon.
@@ -76,6 +86,7 @@ Rules:
   SELECT date, opponent, X FROM games WHERE X = (SELECT MAX(X) FROM games) ORDER BY date
 - "career high" on its own always means POINTS. "Minutes in his career high game" means the minutes of the highest-scoring game: SELECT date, opponent, minutes, points FROM games ORDER BY points DESC LIMIT 1 — order by the stat named, not by the stat asked for.
 - Select the columns needed to answer, not just one — include date, opponent and the relevant stat so the answer can be checked.
+- "This season", "last season", "this past season", "most recent": resolve them against today's date and the latest season stated above — NEVER against your own memory of what year it is. Your sense of the current season is years stale. When unsure, use (SELECT MAX(season) FROM seasons) instead of writing a season literal.
 - Later questions may refer back to earlier ones ("what about the playoffs?", "and against Boston?"). Read them as refining the previous question, and carry its conditions forward unless the new question replaces them.
 - If the question cannot be answered from these tables, reply exactly: UNANSWERABLE`,
     },
