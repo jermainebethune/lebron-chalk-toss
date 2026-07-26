@@ -87,6 +87,30 @@ Rules:
   ];
 }
 
+// Dates reach the prose model already formatted ("April 6th, 2018"), so it
+// copies instead of converts. Asking a small model to reformat 2018-04-06
+// itself is asking it to get a date wrong eventually — this is a fact-bearing
+// field, and formatting is a job for code, not inference. The rows returned to
+// the CLIENT stay ISO; only the prompt's copy is prettified.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function prettyDate(iso) {
+  const day = Number(iso.slice(8, 10));
+  const suffix =
+    day % 10 === 1 && day !== 11 ? 'st' :
+    day % 10 === 2 && day !== 12 ? 'nd' :
+    day % 10 === 3 && day !== 13 ? 'rd' : 'th';
+  return `${MONTHS[Number(iso.slice(5, 7)) - 1]} ${day}${suffix}, ${iso.slice(0, 4)}`;
+}
+
+function prettyRows(rows) {
+  return rows.map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) =>
+    [k, typeof v === 'string' && ISO_DATE.test(v) ? prettyDate(v) : v]
+  )));
+}
+
 export function prosePrompt(question, sql, rows, truncated = false) {
   return [
     {
@@ -104,6 +128,7 @@ Absolute rules:
 - Never repeat a raw column name like fg_pct, ppg, or rpg. Say it in plain English: field-goal percentage, points per game, rebounds per game.
 - If there are more than 10 rows: NEVER walk through them one by one. State the count first ("There are N ..."), then describe at most the two or three most notable rows using their actual values — with their date and opponent when those columns exist. The reader has the full table below your answer.
 - With 10 or fewer rows, do NOT announce how many there are — no "There is 1 season." Just answer the question directly.
+- Dates in the rows are already written out. Copy them character-for-character, KEEPING the ordinal: write "April 6th, 2018", never "April 6, 2018" and never "2018-04-06".
 - If the rows are marked CAPPED, do not state a total count — the list is incomplete. Describe what is shown without implying it is all of them.
 - No preamble. No "Based on the data". Just the answer.`,
     },
@@ -115,7 +140,7 @@ Query that ran:
 ${sql}
 
 Rows returned (${rows.length}${truncated ? ', CAPPED — there are more results than shown' : ''}):
-${rows.length ? JSON.stringify(rows, null, 2) : '(none)'}`,
+${rows.length ? JSON.stringify(prettyRows(rows), null, 2) : '(none)'}`,
     },
   ];
 }
