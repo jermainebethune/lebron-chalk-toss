@@ -3,6 +3,9 @@
   "name": "chalk-toss",
   "main": "src/index.js",
   "compatibility_date": "2026-07-18",
+  // The MCP SDK reaches for Node built-ins. Additive for everything else here —
+  // it makes APIs available, it doesn't change how existing code runs.
+  "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true
   },
@@ -31,11 +34,44 @@
   "ai": {
     "binding": "AI"
   },
+  // Semantic cache for questions. AI Gateway caches on exact prompt text, so
+  // three wordings of the same question are three cache misses and three full
+  // pipeline runs. This matches on meaning instead. What's cached is the SQL,
+  // never the answer — see src/semcache.js for why that distinction is the
+  // whole design.
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      // 1024 dims, matching bge-large-en-v1.5. The original 768-dim
+      // chalk-toss-questions index is left in place, unbound — an index costs
+      // nothing to keep and it is the fallback if bge-large disappoints.
+      "index_name": "chalk-toss-questions-lg"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "lebron-oracle",
       "database_id": "025ea190-bcfb-4cea-8aad-9c2cba42419c"
+    }
+  ],
+  // Two Durable Object classes, for the two things that need to be in exactly
+  // one place. MCP_OBJECT is one instance per MCP session — that's what makes
+  // follow-up questions work without the client threading state back.
+  // RATE_LIMITER is the Neuron budget: a counter can't be spread across
+  // Workers and still be a counter.
+  "durable_objects": {
+    "bindings": [
+      { "name": "MCP_OBJECT", "class_name": "ChalkTossMCP" },
+      { "name": "RATE_LIMITER", "class_name": "RateLimiter" }
+    ]
+  },
+  // SQLite-backed, which is the only option on the free tier and the right one
+  // regardless — both classes store a few keys and nothing else.
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChalkTossMCP", "RateLimiter"]
     }
   ]
 }

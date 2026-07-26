@@ -94,6 +94,10 @@ Secrets live on the Worker, data lives in D1, so neither is on any laptop. See
 | File | Purpose |
 |---|---|
 | `src/index.js` | Request flow and error handling |
+| `src/oracle.js` | The pipeline with no transport attached — question in, rows out |
+| `src/mcp.js` | The MCP server — same pipeline, spoken to by other models |
+| `src/limiter.js` | The rate-limiting Durable Object |
+| `src/budget.js` | The rate-limit decision, as testable arithmetic |
 | `src/access.js` | Who may spend a Neuron — Turnstile or API key |
 | `src/guard.js` | SQL validation — the security boundary |
 | `src/prompts.js` | The two prompts and the schema shown to the model |
@@ -102,6 +106,7 @@ Secrets live on the Worker, data lives in D1, so neither is on any laptop. See
 | `extract.mjs` | Regenerates `seed.sql` from the balldontlie API |
 | `deploy.sh` | Deploys, then emails a summary — only if the deploy succeeded |
 | `test/guard.test.js` | 15 unit tests against the guard |
+| `test/budget.test.js` | 10 unit tests against the rate-limit arithmetic |
 | `diagrams/` | Source HTML for every diagram — self-contained, no build step |
 | `eval/cases.js` | The answer key — 20 questions with queries we trust |
 | `eval/run.mjs` | Runs the answer key against the live app |
@@ -256,6 +261,171 @@ not a verb, and still works.
 
 The D1 binding should also be read-only in production. The guard is defence in depth, not
 the only defence.
+
+## The MCP server
+
+The website answers questions from a text box. The MCP server answers them from whatever
+else is holding a model — Claude Desktop, an IDE, another agent. Same database, same guard,
+same refusal to let a model state a number it wasn't handed.
+
+**Endpoint:** `https://chalk-toss.jermaine-e7a.workers.dev/mcp` (Streamable HTTP).
+`/sse` is also routed, for clients still pinned to the older transport.
+
+Use the `workers.dev` host, not `chalk.jermainebethune.com` — the zone's bot protection
+challenges API clients on the custom domain. Adding it to a client:
+
+```json
+{
+  "mcpServers": {
+    "chalk-toss": {
+      "type": "http",
+      "url": "https://chalk-toss.jermaine-e7a.workers.dev/mcp"
+    }
+  }
+}
+```
+
+No authentication. The budget is metered instead — see below.
+
+### The tool surface is two-tiered, and the split is the point
+
+| Tool | Cost | Who writes the SQL |
+|---|---|---|
+| `ask_lebron` | ~35.5 Neurons | Ours |
+| `run_stat_query` | a D1 read | **Theirs** |
+| `get_schema` | a D1 read | — |
+| `get_season_averages` | a D1 read | — |
+
+`run_stat_query` is the more interesting tool. A calling model that can already write SQLite
+doesn't need ours to translate for it — it needs a schema, a validator it cannot talk its way
+past, and a database. So it gets exactly that. The guard was written to protect D1 from our
+own model; it turns out to protect it from anyone's, and a caller-written query gets no more
+trust than a model-written one and no less.
+
+That inverts the usual economics of an AI service. The *cheapest* path through this server is
+also the most capable one, and it costs us a D1 read rather than a model call.
+
+Every tool returns the SQL that ran alongside the rows, so the caller can check the work
+rather than take the answer on faith — the same reason the website shows the query.
+
+### Sessions are Durable Objects, so follow-ups work
+
+Each MCP session is one Durable Object instance, which is what lets `ask_lebron` accept
+"what about the playoffs?" without the client threading state back. The last four exchanges
+are stored — persisted, not held in memory, because the object hibernates between questions
+and an in-memory array would silently empty out mid-conversation after a quiet minute.
+Pass `new_conversation: true` to start fresh.
+
+### Why it's open, and how the budget survives that
+
+Turnstile can't apply here: an MCP client is a program by definition, and there's no human to
+challenge. But the thing Turnstile protects is still worth protecting — at ~35.5 Neurons a
+question against a 10,000/day allowance, roughly 280 questions exhaust the day and the site
+goes down until 00:00 UTC.
+
+So the server is open and the *budget* is metered, by a second Durable Object. Counting is
+exactly the job a DO exists for: a counter has to be in one place, and Workers are in every
+place.
+
+Two limits, one class, distinguished only by which instance you address:
+
+- **20 questions per hour per client** (`ip:<addr>`) — stops one caller monopolizing the day
+- **150 questions per day, server-wide** (`global`) — so all the per-client budgets together
+  still can't overrun the allowance, and the website keeps working no matter what the MCP
+  surface is doing
+
+Per-IP is checked **first**. If a caller is over their own limit, that must not consume a unit
+of the global budget — otherwise one abusive client drains the day's ceiling while being
+refused every time.
+
+Only the Neuron-spending tool is metered. The D1-backed tools are throttling nothing scarce,
+so they run free — and a refusal says so, pointing the caller at `run_stat_query` instead of
+just failing.
+
+The window is fixed rather than sliding: a sliding window needs the timestamp of every request
+in it, a fixed window needs a count and one deadline. The failure mode is a burst across the
+boundary — up to 2× the limit in one instant — which for a spend cap is a rounding error.
+Refusals write nothing, so hammering a spent budget can't cause a storage write per attempt,
+and each write sets an alarm at the reset time to delete the instance's storage rather than
+leaving a row behind for every IP that ever called.
+
+## The semantic cache
+
+AI Gateway caches on exact prompt text, so three wordings of one question are three
+cache misses and three full pipeline runs. Worse, the SQL prompt contains today's date
+(the temporal anchor), so the exact-match cache empties itself every midnight UTC.
+
+Vectorize matches on meaning instead: embed the question, look for a near neighbour among
+questions already asked, reuse what it produced.
+
+### It caches the SQL, not the answer
+
+This is the decision the whole feature rests on. A semantic cache normally returns the
+stored *answer*. Here that would break the guarantee everything else is defending.
+
+The database updates nightly. A cached answer — "his career high is 61 points" — is a
+frozen fact, and the night ingestion adds a 62-point game it becomes a lie the system
+states confidently in its own voice.
+
+A cached *SQL statement* has no such problem. Re-run it, get today's rows. Every number
+still comes from D1 on every request; only the translation from English is skipped. And
+translation is where the money is — measured on a real day, `qwen2.5-coder-32b` (SQL)
+burned 8,296 Neurons against `llama-4-scout-17b` (prose) at 2,232. A hit skips 77% of the
+cost and still runs the query.
+
+The guard runs on cached SQL too. A statement isn't more trustworthy for having been
+approved once before.
+
+### Choosing the threshold — the measurement that changed the design
+
+The cutoff was set by measuring, not by intuition. Pairwise cosine similarity:
+
+| Pair | bge-base (768d) | bge-large (1024d) |
+|---|---|---|
+| Paraphrase — close wording | 0.9269 | **0.9643** |
+| Paraphrase — nickname ("Celtics" for "Boston") | 0.9074 | **0.9220** |
+| Paraphrase — loose wording | 0.8625 | 0.8627 |
+| Near-miss — **wrong team** (Miami vs Boston) | 0.9007 | 0.8936 |
+| Near-miss — **wrong stat** (rebounds vs points) | 0.8958 | 0.8959 |
+| Near-miss — **wrong stat** (Denver assists vs rebounds) | 0.8773 | 0.8778 |
+
+Read the third row against the fourth. **The loosest paraphrase scores below every
+near-miss.** The classes overlap, so no threshold separates them cleanly. These questions
+share so much boilerplate — "what was his highest ___ game against ___" — that the shared
+structure dominates the similarity, and the part that actually distinguishes them (one
+team name, one stat name) is a small fraction of the sentence.
+
+That killed the original plan of an aggressive cutoff. The line is drawn to be *safe*
+rather than complete: **0.92**, above every measured near-miss by 0.024, catching the two
+paraphrase forms people actually type and letting loosely-worded ones pay full price.
+
+`bge-large` earns its extra 256 dimensions here — it pulls real paraphrases up and pushes
+near-misses down. `bge-base` cannot express this policy at all: its nickname paraphrase
+(0.9074) scores *below* its own wrong-team near-miss (0.9007), so any threshold catching
+the first also catches the second.
+
+The asymmetry justifies the caution. A miss costs ~35 Neurons. A bad hit answers a
+question nobody asked, with real rows from a real query, and looks entirely correct.
+
+Six pairs is a small sample. `GET /api/cache/probe?q=...` (API key) reports nearest
+neighbours and scores without serving from cache, for extending it.
+
+### What is never cached
+
+- **Follow-ups.** "What about the playoffs?" means nothing on its own.
+- **Temporal questions** — anything matching this/last/latest/current/recent/today. "How
+  many points this season?" may produce `WHERE season = '2025-26'` as a literal, correct
+  today and wrong in November. A cache entry outlives the assumption behind it.
+- **UNANSWERABLE verdicts.** That's a judgement about the schema, and the schema can gain
+  a column.
+- **Queries D1 rejected.** Caching a statement known not to run would turn a one-off model
+  mistake into a permanently reproducible failure.
+
+### Gotcha: Vectorize is eventually consistent
+
+An upsert is not immediately queryable. Two measurement runs produced nonsense — a seeded
+question scoring 0 against an index that genuinely did contain it moments later. If you
+seed and query in quick succession, you are measuring indexing lag, not similarity.
 
 ## What went wrong while building it
 

@@ -54,6 +54,28 @@ CREATE TABLE games (
   FOREIGN KEY (season) REFERENCES seasons(season)
 );
 
+-- Every ingestion run, successful or not.
+--
+-- The cron used to console.log its summary and that was the whole record,
+-- which left the worst failure invisible: the feed changes shape, ingestion
+-- finds zero new games every night, and the cron keeps reporting success.
+-- Nothing alerts because nothing errored. A row per run makes "it has been
+-- quietly doing nothing since Tuesday" something you can actually see.
+CREATE TABLE ingest_runs (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  ran_at           TEXT    NOT NULL,   -- ISO timestamp, UTC
+  trigger          TEXT    NOT NULL,   -- 'cron' | 'manual'
+  ok               INTEGER NOT NULL,   -- 1 success, 0 threw
+  new_games        INTEGER NOT NULL DEFAULT 0,
+  seasons_upserted TEXT,               -- JSON array of season labels
+  since            TEXT,               -- watermark going in
+  latest           TEXT,               -- watermark coming out
+  ms               INTEGER,
+  error            TEXT                -- message when ok = 0
+);
+
+CREATE INDEX idx_ingest_runs_ran_at ON ingest_runs(ran_at);
+
 CREATE INDEX idx_games_points   ON games(points);
 CREATE INDEX idx_games_opponent ON games(opponent);
 CREATE INDEX idx_games_date     ON games(date);

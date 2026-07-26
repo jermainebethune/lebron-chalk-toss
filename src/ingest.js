@@ -170,3 +170,66 @@ export async function ingest(env) {
   summary.ms = Date.now() - started;
   return summary;
 }
+
+/**
+ * Run the ingestion and write down what happened.
+ *
+ * Before this existed the cron did `console.log('ingest', ...)` and that was
+ * the entire record. The summary went to Workers logs and nowhere queryable,
+ * which left one failure mode completely invisible: balldontlie changes a
+ * field, ingestion starts finding zero new games, and the cron keeps
+ * succeeding. Nothing alerts, because nothing failed. You find out weeks later
+ * when someone asks about a recent game and gets a stale answer.
+ *
+ * So every run is recorded, and FAILURES ESPECIALLY — a run that threw is the
+ * one you most need to see, and it is exactly the one that writes nothing if
+ * you only record successes.
+ *
+ * Recording never masks the outcome: a failed ingest still throws, a failed
+ * *recording* is logged and swallowed. Bookkeeping must not be able to break
+ * the thing it is keeping books on.
+ */
+export async function ingestAndRecord(env, trigger = 'cron') {
+  const ranAt = new Date().toISOString();
+  try {
+    const summary = await ingest(env);
+    await recordRun(env, { ranAt, trigger, ok: 1, summary });
+    return summary;
+  } catch (err) {
+    await recordRun(env, { ranAt, trigger, ok: 0, error: err });
+    throw err;
+  }
+}
+
+async function recordRun(env, { ranAt, trigger, ok, summary, error }) {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO ingest_runs (ran_at, trigger, ok, new_games, seasons_upserted, since, latest, ms, error)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`
+    ).bind(
+      ranAt,
+      trigger,
+      ok,
+      summary?.newGames ?? 0,
+      JSON.stringify(summary?.seasonsUpserted ?? []),
+      summary?.since ?? null,
+      summary?.latest ?? null,
+      summary?.ms ?? null,
+      error ? String(error.message ?? error).slice(0, 500) : null
+    ).run();
+  } catch (writeErr) {
+    console.error('could not record ingest run', writeErr?.message);
+  }
+}
+
+/** The last N runs, newest first. Read by the admin dashboard. */
+export async function recentRuns(env, limit = 14) {
+  const { results } = await env.DB.prepare(
+    `SELECT ran_at, trigger, ok, new_games, seasons_upserted, since, latest, ms, error
+     FROM ingest_runs ORDER BY id DESC LIMIT ?1`
+  ).bind(limit).all();
+  return (results ?? []).map((r) => ({
+    ...r,
+    seasons_upserted: JSON.parse(r.seasons_upserted || '[]'),
+  }));
+}

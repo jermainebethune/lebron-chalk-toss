@@ -1,241 +1,32 @@
-import { guard, SqlRejected, MAX_LIMIT } from './guard.js';
-import { sqlPrompt, prosePrompt } from './prompts.js';
+import { SqlRejected, MAX_LIMIT } from './guard.js';
+import { prosePrompt } from './prompts.js';
 import { authorize, mintSession } from './access.js';
 import { page } from './ui.js';
-import { ingest } from './ingest.js';
+import { ingestAndRecord } from './ingest.js';
+import {
+  PROSE_MODEL,
+  TRUNCATION_NOTE,
+  ask,
+  cleanHistory,
+  infer,
+  provenance,
+  resolve,
+  textOf,
+} from './oracle.js';
+import { probe } from './semcache.js';
+import { ChalkTossMCP } from './mcp.js';
 
-// Two jobs, two models, chosen for what each job actually needs.
-//
-// Writing SQL is the hard step and the one that breaks answers, so it gets a
-// code-specialized model. Summarizing rows that were handed to you is easy, so
-// it gets a small cheap one — a bigger model can't improve a summary whose
-// facts are already fixed, it can only cost more Neurons.
-//
-// Response envelopes vary across model families — see textOf() below, which
-// normalizes them so swapping either model here doesn't break the caller.
-const SQL_MODEL = '@cf/qwen/qwen2.5-coder-32b-instruct';
-// 3.2-3b wrote fine prose until the rule list grew (full team names over
-// nicknames, ordinal dates, count-vs-describe) — then it started dropping
-// rows and mirroring nicknames. Prose is ~6% of per-question cost, so a
-// mid-size upgrade is a rounding error next to the SQL call. llama-3.1-8b
-// was the first choice but is deprecated (runtime 5028) — probed the
-// catalog and Scout is the smallest current model that follows the rules.
-const PROSE_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
-
-// Every inference goes through AI Gateway: caching, request logs, and per-model
-// analytics for free. Both prompts are self-invalidating — the SQL prompt
-// contains the schema, the prose prompt contains the returned rows — so a data
-// or schema change produces a different prompt and therefore a cache miss.
-// Nothing stale can be served.
-const GATEWAY = 'chalk-toss';
-const gatewayOpts = (skipCache) => ({ gateway: { id: GATEWAY, skipCache: Boolean(skipCache) } });
-
-/**
- * Run inference, retrying once on a transient failure.
- *
- * Workers AI occasionally errors for no reason attributable to the request —
- * an eval run failed six of twenty cases with 500s that were not reproducible
- * minutes later, and the same suite passed 20/20 immediately after. Without a
- * retry, one upstream blip becomes a user-facing error on a question that is
- * perfectly answerable.
- *
- * One retry, not many: if the second attempt also fails, something is actually
- * wrong and hammering it will not help.
- */
-async function infer(env, model, inputs, skipCache) {
-  try {
-    return await env.AI.run(model, inputs, gatewayOpts(skipCache));
-  } catch (err) {
-    console.warn('inference failed, retrying once', model, err?.message);
-    await new Promise((r) => setTimeout(r, 250));
-    return env.AI.run(model, inputs, gatewayOpts(skipCache));
-  }
-}
+// Durable Object classes have to be exported from the Worker's entrypoint for
+// the runtime to find them by class_name. ChalkTossMCP is one session of the
+// MCP server; RateLimiter is the per-IP Neuron budget it spends against.
+export { ChalkTossMCP } from './mcp.js';
+export { RateLimiter } from './limiter.js';
 
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   });
-
-/**
- * Pull text out of a Workers AI response.
- *
- * Model families disagree on the envelope, and even a single model does not
- * always put a string in `response` — it can arrive as a number, or as an
- * object when the model emits structured output. Assuming `.response` is a
- * string is how this broke the first time, so normalize instead of trusting.
- */
-function textOf(result) {
-  if (result == null) return '';
-
-  const direct = result.response;
-  if (typeof direct === 'string') return direct;
-  if (typeof direct === 'number' || typeof direct === 'boolean') return String(direct);
-
-  // OpenAI-style envelope (gpt-oss, granite) — and its streaming delta form.
-  const choice = result.choices?.[0]?.message?.content;
-  if (typeof choice === 'string') return choice;
-  const delta = result.choices?.[0]?.delta?.content;
-  if (typeof delta === 'string') return delta;
-
-  // Some models return content as an array of parts.
-  if (Array.isArray(direct)) {
-    return direct.map(p => (typeof p === 'string' ? p : p?.text ?? '')).join('');
-  }
-  if (direct && typeof direct === 'object' && typeof direct.text === 'string') {
-    return direct.text;
-  }
-
-  return '';
-}
-
-async function provenance(env) {
-  try {
-    const row = await env.DB.prepare(
-      'SELECT verified, source, updated_at FROM data_provenance WHERE id = 1'
-    ).first();
-    return row ?? { verified: 0, source: 'unknown', updated_at: null };
-  } catch {
-    // Table missing means the seed never ran — treat as unverified, never as fine.
-    return { verified: 0, source: 'no provenance record', updated_at: null };
-  }
-}
-
-/**
- * Follow-up context arrives from the client, which makes it user input.
- * Cap the count and the field lengths, and drop anything malformed rather
- * than erroring — a mangled history should degrade to a cold question, not
- * take the request down. The SQL here is only ever prompt context; the only
- * SQL that reaches D1 is what the model writes THIS turn, and that still
- * goes through the guard.
- */
-function cleanHistory(raw) {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((h) => typeof h?.question === 'string' && typeof h?.sql === 'string'
-      && h.question.trim() && h.sql.trim()
-      && h.question.length <= 300 && h.sql.length <= 2000)
-    .slice(-4)
-    .map((h) => ({ question: h.question.trim(), sql: h.sql.trim() }));
-}
-
-/**
- * Everything up to (but not including) the prose step: SQL generation, the
- * guard, and the D1 query. Shared by the JSON and streaming paths so the two
- * cannot drift apart.
- *
- * Returns { done } when the answer is already decided in code — unanswerable,
- * query failure, empty result — or { sql, rows, truncated, provenance } when
- * there are rows for the prose model to describe.
- */
-async function resolve(question, history, env, skipCache = false) {
-  const meta = await provenance(env);
-
-  // Temporal anchor for the SQL prompt: without today's date and the actual
-  // latest season, "last season" resolves against the model's training-era
-  // sense of now — it confidently hardcoded 2022-23 in production. The date
-  // in the prompt also rolls the AI Gateway cache daily, which is correct:
-  // "this season" is allowed to mean something new tomorrow.
-  let anchor = null;
-  try {
-    const latest = await env.DB.prepare('SELECT MAX(season) AS s FROM seasons').first();
-    if (latest?.s) {
-      anchor = { today: new Date().toISOString().slice(0, 10), latestSeason: latest.s };
-    }
-  } catch (e) {
-    console.warn('anchor query failed, prompting without one', e?.message);
-  }
-
-  // 1. Question -> SQL
-  const drafted = await infer(env, SQL_MODEL, {
-    messages: sqlPrompt(question, history, anchor),
-    max_tokens: 300,
-    temperature: 0,
-  }, skipCache);
-  const raw = textOf(drafted).trim();
-
-  if (/^UNANSWERABLE/i.test(raw)) {
-    return { done: {
-      answer:
-        "That can't be answered from this database. It holds every game he has played — minutes, points, rebounds, assists, steals, blocks, turnovers, opponent and date — plus season averages. No awards, salary, draft or biographical data.",
-      sql: null,
-      rows: [],
-      provenance: meta,
-    } };
-  }
-
-  // 2. Validate before it goes anywhere near D1
-  const sql = guard(raw);
-
-  // 3. Run it. Real numbers enter here and nothing downstream can change them.
-  //
-  // A query that references a column we don't have is the model asking about
-  // data that doesn't exist — awards, salaries, whatever it imagined. That must
-  // read as "not in this database", never as a number. Answering "0 MVPs" from
-  // an empty column is the worst possible outcome: confidently wrong, and
-  // indistinguishable from a real answer.
-  let rows;
-  try {
-    const result = await env.DB.prepare(sql).all();
-    rows = result.results ?? [];
-  } catch (dbErr) {
-    console.error('query failed', sql, dbErr);
-    return { done: {
-      answer:
-        "That can't be answered from this database. It holds every game he has played plus season averages — no awards, salary, draft or biographical data.",
-      sql,
-      rows: [],
-      provenance: meta,
-    } };
-  }
-
-  // 4. The empty case is decided in code, never by the model.
-  //
-  // This was originally an instruction in the prose prompt ("if the rows are
-  // empty, say so") and the small model fired that branch about one time in
-  // three even when rows WERE present — reporting no results over a populated
-  // table. A branch the code can evaluate should never be delegated to a model.
-  // Returning early also skips an inference call we don't need.
-  if (rows.length === 0) {
-    return { done: {
-      answer: 'No games in the database match that.',
-      sql,
-      rows,
-      provenance: meta,
-    } };
-  }
-
-  // 5. Did we hit the row ceiling? Then this is a PARTIAL answer, and saying so
-  //    is not optional. Found by the eval harness: "40+ games" has 108 results,
-  //    the guard's LIMIT 100 cut it to 100, and the answer read as complete.
-  //    A truncated result presented as whole is the same failure as a wrong
-  //    number — the user cannot tell it is incomplete.
-  const truncated = rows.length >= MAX_LIMIT;
-
-  return { sql, rows, truncated, provenance: meta };
-}
-
-const TRUNCATION_NOTE = (n) => ` (Showing the first ${n} results — there are more.)`;
-
-async function ask(question, history, env, skipCache = false) {
-  const r = await resolve(question, history, env, skipCache);
-  if (r.done) return r.done;
-
-  // 6. Rows -> prose. The model only ever sees a non-empty result set.
-  const written = await infer(env, PROSE_MODEL, {
-    messages: prosePrompt(question, r.sql, r.rows, r.truncated),
-    max_tokens: 200,
-    temperature: 0,
-  }, skipCache);
-
-  let answer = textOf(written).trim() || 'The query ran but produced no summary.';
-  if (r.truncated) {
-    answer += TRUNCATION_NOTE(MAX_LIMIT);
-  }
-
-  return { answer, sql: r.sql, rows: r.rows, truncated: r.truncated, provenance: r.provenance };
-}
 
 /**
  * The streaming variant. Same pipeline, but the response is server-sent
@@ -327,8 +118,23 @@ function askStream(question, history, env, skipCache = false, session = null) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    // The MCP server. Streamable HTTP is the current transport in the spec;
+    // /sse is the older one, still routed because shipped clients pinned to it
+    // outnumber the ones that have moved. Both reach the same agent.
+    //
+    // The caller's IP is handed over through ctx.props — the same channel an
+    // OAuth provider would use to pass identity. The agent runs inside a
+    // Durable Object where cf-connecting-ip is not something to rely on, and
+    // the rate limiter needs to know who it is metering.
+    if (url.pathname === '/mcp' || url.pathname.startsWith('/sse')) {
+      ctx.props = { ...(ctx.props ?? {}), ip: request.headers.get('cf-connecting-ip') ?? null };
+      return url.pathname === '/mcp'
+        ? ChalkTossMCP.serve('/mcp').fetch(request, env, ctx)
+        : ChalkTossMCP.serveSSE('/sse').fetch(request, env, ctx);
+    }
 
     if (url.pathname === '/') {
       // The kicker line counts what is actually in the database, so a night's
@@ -361,7 +167,7 @@ export default {
         return json({ error: 'BALLDONTLIE_KEY is not configured.' }, 500);
       }
       try {
-        return json(await ingest(env));
+        return json(await ingestAndRecord(env, 'manual'));
       } catch (err) {
         console.error('ingest failed', err);
         return json({ error: `Ingest failed: ${err.message}` }, 500);
@@ -439,6 +245,25 @@ export default {
       }
     }
 
+    // Threshold tuning instrument. Reports the nearest cached questions and
+    // their scores WITHOUT serving from cache, so the cutoff can be chosen
+    // from real numbers instead of guessed. API key only — it embeds text,
+    // which costs a little, and it exposes what has been asked before.
+    if (url.pathname === '/api/cache/probe') {
+      const allowed = await authorize(request, {}, env);
+      if (!allowed.ok || allowed.via !== 'api-key') {
+        return json({ error: 'API key required.' }, 401);
+      }
+      const q = url.searchParams.get('q');
+      if (!q) return json({ error: 'Pass ?q=<question>' }, 400);
+      try {
+        return json(await probe(env, q));
+      } catch (err) {
+        console.error('cache probe failed', err);
+        return json({ error: `Probe failed: ${err.message}` }, 500);
+      }
+    }
+
     if (url.pathname === '/api/health') {
       return json({ ok: true, provenance: await provenance(env) });
     }
@@ -450,7 +275,7 @@ export default {
   // before has a final box score by then, including West Coast overtimes.
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(
-      ingest(env)
+      ingestAndRecord(env, 'cron')
         .then((s) => console.log('ingest', JSON.stringify(s)))
         .catch((err) => console.error('ingest failed', err))
     );

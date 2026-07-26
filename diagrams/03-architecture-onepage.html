@@ -26,22 +26,22 @@
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 30px 34px; width: 1400px; zoom: 0.85;
+    margin: 0; padding: 28px 32px; width: 1560px; zoom: 0.74;
     background: var(--ground); color: var(--ink);
-    font-family: var(--body); line-height: 1.45;
+    font-family: var(--body); line-height: 1.42;
   }
   .head { display: flex; align-items: baseline; justify-content: space-between; gap: 2rem; margin-bottom: 4px; }
   h1 { font-family: var(--display); font-size: 27px; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
   .sub { font-size: 13px; color: var(--soft); margin: 0; }
-  .stamp { font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); white-space: nowrap; }
+  .stamp { font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--faint); white-space: nowrap; text-align: right; }
 
-  .band { margin-top: 18px; }
+  .band { margin-top: 17px; }
   .bandlabel {
     font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.14em;
     text-transform: uppercase; color: var(--faint); margin-bottom: 7px;
   }
 
-  /* build strip */
+  /* build / refresh / verify strips */
   .build { display: flex; align-items: center; gap: 7px; }
   .bstage {
     flex: 1; background: var(--panel); border: 1px dashed var(--rule);
@@ -51,12 +51,13 @@
   .bstage .d { font-size: 10.5px; color: var(--faint); margin-top: 1px; }
   .arrow { color: var(--faint); font-family: var(--mono); font-size: 12px; flex: none; }
 
-  /* main chain */
-  .chain { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; align-items: stretch; }
+  /* main chain — now eight steps */
+  .chain { display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px; align-items: stretch; }
   .step {
     background: var(--panel); border: 1px solid var(--rule);
     border-top: 3px solid var(--tone); border-radius: 3px;
-    padding: 9px 10px 10px; display: flex; flex-direction: column; gap: 3px;
+    padding: 9px 9px 10px; display: flex; flex-direction: column; gap: 3px;
+    position: relative;
   }
   .step[data-t="edge"] { --tone: var(--edge); --wash: var(--edge-wash); }
   .step[data-t="ai"]   { --tone: var(--ai);   --wash: var(--ai-wash); }
@@ -68,11 +69,28 @@
     background: var(--wash); border-radius: 2px; padding: 1px 5px; align-self: flex-start;
   }
   .swho { font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--tone); margin-top: 2px; }
-  .swhat { font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
-  .swhy { font-size: 11px; color: var(--soft); }
+  .swhat { font-family: var(--display); font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; }
+  .swhy { font-size: 10.5px; color: var(--soft); }
+
+  /* a step that can be skipped */
+  .step.skippable { border-style: dashed; }
+  .skiptag {
+    font-family: var(--mono); font-size: 8px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--data); background: var(--data-wash); border-radius: 2px;
+    padding: 1px 4px; align-self: flex-start; margin-top: 2px; font-weight: 700;
+  }
+
+  /* the two bypass rails drawn under the chain */
+  .rails { display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px; margin-top: 6px; }
+  .rail {
+    border: 1px dashed var(--tone, var(--data)); background: var(--wash, var(--data-wash));
+    border-radius: 3px; padding: 5px 8px;
+  }
+  .rail .rt { font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.05em; text-transform: uppercase; font-weight: 700; color: var(--tone, var(--data)); }
+  .rail .rb { font-size: 10px; color: var(--soft); margin-top: 1px; }
 
   /* refusal row aligned under chain */
-  .refusals { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 7px; align-items: start; }
+  .refusals { display: grid; grid-template-columns: repeat(8, 1fr); gap: 7px; margin-top: 7px; align-items: start; }
   .ref {
     border-left: 2px dashed var(--stop); background: var(--stop-wash);
     border-radius: 0 3px 3px 0; padding: 6px 8px;
@@ -83,7 +101,7 @@
   .stack { display: flex; flex-direction: column; gap: 6px; }
 
   /* bottom row */
-  .bottom { display: grid; grid-template-columns: 1.35fr 1fr 1fr; gap: 12px; margin-top: 20px; align-items: start; }
+  .bottom { display: grid; grid-template-columns: 1.25fr 1fr 1fr 0.9fr; gap: 11px; margin-top: 19px; align-items: start; }
   .box { background: var(--panel); border: 1px solid var(--rule); border-radius: 3px; padding: 11px 13px; }
   .box h3 { font-family: var(--display); font-size: 12.5px; font-weight: 600; margin: 0 0 7px; letter-spacing: -0.005em; }
   .kv { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; padding: 3px 0; border-bottom: 1px solid var(--sunk); }
@@ -91,20 +109,21 @@
   .kv .k { font-family: var(--mono); font-size: 10.5px; color: var(--ink); white-space: nowrap; }
   .kv .v { color: var(--soft); text-align: right; }
   .kv .v b { font-variant-numeric: tabular-nums; color: var(--ink); }
+  .kv.new .k::after { content: " ·new"; color: var(--data); font-size: 8.5px; letter-spacing: 0.05em; }
 
-  .legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-  .lk { display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--soft); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .legend { display: flex; flex-direction: column; gap: 6px; }
+  .lk { display: flex; align-items: flex-start; gap: 6px; font-size: 10.5px; color: var(--soft); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; margin-top: 4px; }
 
   .thesis {
-    margin-top: 16px; background: var(--data-wash); border: 1px solid var(--rule);
+    margin-top: 15px; background: var(--data-wash); border: 1px solid var(--rule);
     border-radius: 3px; padding: 11px 14px;
   }
   .thesis p { margin: 0; }
   .thesis .t1 { font-family: var(--display); font-size: 13px; font-weight: 600; letter-spacing: -0.01em; }
   .thesis .t2 { font-size: 11px; color: var(--soft); margin-top: 3px; }
 
-  .foot { margin-top: 14px; font-size: 10px; color: var(--faint); font-family: var(--mono); }
+  .foot { margin-top: 13px; font-size: 10px; color: var(--faint); font-family: var(--mono); }
 </style>
 </head>
 <body>
@@ -112,101 +131,117 @@
   <div class="head">
     <div>
       <h1>The Chalk Toss — how a question becomes an answer</h1>
-      <p class="sub">The model writes the query and describes the rows. Every number comes from D1 in between; it is never asked to recall one.</p>
+      <p class="sub">The model writes the query and describes the rows. Every number comes from D1 in between; it is never asked to recall one. <b>One validator sits on every path — including the ones with no model in them at all.</b></p>
     </div>
-    <span class="stamp">As built · 26 Jul 2026<br>Workers · Workers AI · D1 · Turnstile · AI Gateway · Cron</span>
+    <span class="stamp">As built · 26 Jul 2026<br>Workers · Workers AI · D1 · Vectorize<br>Durable Objects · Turnstile · AI Gateway · MCP</span>
   </div>
 
   <div class="band">
-    <div class="bandlabel">Build path — full rebuilds, on a laptop. extract.mjs reads the key from ~/.balldontlie_key.</div>
+    <div class="bandlabel">Data path — seeded once on a laptop, then the database keeps itself current</div>
     <div class="build">
-      <div class="bstage"><div class="n">~/.balldontlie_key</div><div class="d">Local file, chmod 600, outside the repo</div></div>
+      <div class="bstage"><div class="n">extract.mjs</div><div class="d">Seeds all 1,982 games, full stat line</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">extract.mjs</div><div class="d">Pulls every season + game log</div></div>
+      <div class="bstage"><div class="n">cron · 10:00 UTC</div><div class="d">Polls balldontlie from the MAX(date) watermark</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">seed.sql</div><div class="d">Every game, full stat line</div></div>
+      <div class="bstage"><div class="n">src/ingest.js</div><div class="d">Drops DNP rows, inserts games, upserts seasons</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">D1</div><div class="d">wrangler d1 execute --remote</div></div>
+      <div class="bstage"><div class="n">D1 + ingest_runs</div><div class="d">Every run recorded — <b>including failures</b>, or a silent no-op is invisible</div></div>
     </div>
   </div>
 
   <div class="band">
-    <div class="bandlabel">Refresh path — nightly at 10:00 UTC, no laptop. BALLDONTLIE_KEY is a Worker secret; runs are idempotent.</div>
-    <div class="build">
-      <div class="bstage"><div class="n">Cron trigger</div><div class="d">Platform calls scheduled() — no request involved</div></div>
-      <span class="arrow">→</span>
-      <div class="bstage"><div class="n">ingest.js</div><div class="d">Polls from the MAX(date) watermark, per season</div></div>
-      <span class="arrow">→</span>
-      <div class="bstage"><div class="n">filter DNPs</div><div class="d">0 floor seconds is not a game played</div></div>
-      <span class="arrow">→</span>
-      <div class="bstage"><div class="n">D1 upsert</div><div class="d">seasons first (FK), then games, then provenance. First run: all 70 games of 2025-26 in 829ms</div></div>
-    </div>
-  </div>
-
-  <div class="band">
-    <div class="bandlabel">Request path — left to right, one question</div>
+    <div class="bandlabel">Request path — left to right, one question. Dashed boxes can be skipped.</div>
     <div class="chain">
 
       <div class="step" data-t="edge">
         <span class="snum">1</span>
-        <span class="swho">Browser</span>
+        <span class="swho">Client</span>
         <span class="swhat">The question</span>
-        <span class="swhy">Custom domain for people, workers.dev for API clients. The last 4 exchanges ride along — follow-ups resolve against them.</span>
+        <span class="swhy">Three kinds now: a browser, a script with an API key, or <b>an AI agent over MCP</b>.</span>
       </div>
 
       <div class="step" data-t="stop">
         <span class="snum">2</span>
-        <span class="swho">Worker · access.js</span>
-        <span class="swhat">Checks input + who's asking</span>
-        <span class="swhy">API key → 2h session → Turnstile, in that order. The first Turnstile pass mints the session — one challenge per visit. Checked before any inference; this is the line where spending starts.</span>
+        <span class="swho">access.js · limiter</span>
+        <span class="swhat">Who's asking, and can they afford it</span>
+        <span class="swhy">API key → 2h session → Turnstile, in that order; the first Turnstile pass mints the session, so one challenge per visit. MCP has no human to challenge, so a Durable Object meters it instead: 20/hr per IP, 150/day global.</span>
       </div>
 
-      <div class="step" data-t="ai">
+      <div class="step skippable" data-t="data">
         <span class="snum">3</span>
-        <span class="swho">AI Gateway → Workers AI</span>
+        <span class="swho">Vectorize</span>
+        <span class="swhat">Seen this question before?</span>
+        <span class="swhy">Embeds the question and looks for a near neighbour. <b>Caches SQL, never answers</b> — so a hit still re-queries D1 and reports today's rows.</span>
+      </div>
+
+      <div class="step skippable" data-t="ai">
+        <span class="snum">4</span>
+        <span class="swho">Gateway → Workers AI</span>
         <span class="swhat">Writes SQL</span>
-        <span class="swhy">qwen2.5-coder-32b, temp 0. Prompt carries today's date + latest season — the model's own "now" is years stale. Repeats served from cache for 0 Neurons.</span>
+        <span class="swhy">qwen2.5-coder-32b, temperature 0. Asked for a statement — never an answer.</span>
+        <span class="skiptag">skipped on a cache hit</span>
       </div>
 
       <div class="step" data-t="stop">
-        <span class="snum">4</span>
+        <span class="snum">5</span>
         <span class="swho">Guard</span>
         <span class="swhat">Validates the SQL</span>
-        <span class="swhy">Allowlist with a preprocessing pass. Strips comments and literals first, then asserts one SELECT. 15 tests.</span>
+        <span class="swhy">Allowlist with a preprocessing pass. <b>Every path converges here</b> — generated, cached, or written by the caller. 15 tests.</span>
       </div>
 
       <div class="step" data-t="data">
-        <span class="snum">5</span>
+        <span class="snum">6</span>
         <span class="swho">D1</span>
         <span class="swhat">Runs it, returns rows</span>
         <span class="swhy">The only source of any figure the user sees. Nothing downstream can alter a number.</span>
       </div>
 
-      <div class="step" data-t="ai">
-        <span class="snum">6</span>
-        <span class="swho">AI Gateway → Workers AI</span>
+      <div class="step skippable" data-t="ai">
+        <span class="snum">7</span>
+        <span class="swho">Gateway → Workers AI</span>
         <span class="swhat">Describes the rows</span>
-        <span class="swhy">llama-4-scout-17b, streamed token-by-token. Dates and team names are formatted in code first, so it copies — never converts.</span>
+        <span class="swhy">llama-4-scout-17b, streamed token-by-token. Only ever sees a non-empty result set. Dates and team names are formatted in code first, so it copies — never converts.</span>
+        <span class="skiptag">skipped for raw-data callers</span>
       </div>
 
       <div class="step" data-t="data">
-        <span class="snum">7</span>
-        <span class="swho">Browser</span>
+        <span class="snum">8</span>
+        <span class="swho">Client</span>
         <span class="swhat">Answer + query + rows + chart</span>
-        <span class="swhy">Streams in as it is written. The prose never appears alone — the reader can always check it against its source.</span>
+        <span class="swhy">The prose never appears alone. The reader — human or model — can always check it against its source.</span>
       </div>
 
     </div>
 
+    <div class="rails">
+      <div class="refspacer"></div>
+      <div class="refspacer"></div>
+      <div class="rail" style="--tone: var(--data); --wash: var(--data-wash); grid-column: span 2;">
+        <div class="rt">⟶ cache hit rejoins at the guard</div>
+        <div class="rb">Skips the SQL model entirely — the single most expensive step. The cached statement is guarded exactly as a fresh one is; approval once is not approval forever.</div>
+      </div>
+      <div class="rail" style="--tone: var(--stop); --wash: var(--stop-wash); grid-column: span 4;">
+        <div class="rt">⟶ MCP · run_stat_query enters here, at step 5</div>
+        <div class="rb"><b>The caller's own model writes the SQL and our guard decides whether it runs.</b> No inference on our side at all — this path never touches an orange box. It is the cheapest route through the system and also the most capable one, which is only possible because the validator distrusts every source equally.</div>
+      </div>
+    </div>
+
     <div class="refusals">
       <div class="refspacer"></div>
-      <div class="ref">
-        <div class="rt">↓ Refusal 0 · not authorized</div>
-        <div class="rb">No Turnstile token and no valid key — rejected before a single Neuron is spent.</div>
+      <div class="stack">
+        <div class="ref">
+          <div class="rt">↓ Refusal 0 · not authorized</div>
+          <div class="rb">No Turnstile token and no valid key — rejected before a single Neuron is spent.</div>
+        </div>
+        <div class="ref">
+          <div class="rt">↓ Limited · budget spent</div>
+          <div class="rb">A disclosure, not a wall: names the reset time and points the caller at the unmetered tools.</div>
+        </div>
       </div>
+      <div class="refspacer"></div>
       <div class="ref">
         <div class="rt">↓ Refusal 1 · out of scope</div>
-        <div class="rb">Awards, salary, 3-point stats, "who's the GOAT" — returns UNANSWERABLE, no query runs.</div>
+        <div class="rb">Awards, salary, three-point stats, "who's the GOAT" — returns UNANSWERABLE, no query runs.</div>
       </div>
       <div class="ref">
         <div class="rt">↓ Refusal 2 · query rejected</div>
@@ -232,15 +267,15 @@
   </div>
 
   <div class="band">
-    <div class="bandlabel">Verification — npm run eval, 26 cases (incl. 4 follow-up cases), ~920 Neurons a run</div>
+    <div class="bandlabel">Verification — npm run eval, 26 cases, 12 numbered bugs regression-locked</div>
     <div class="build">
       <div class="bstage"><div class="n">eval/cases.js</div><div class="d">Each question paired with a query we wrote and trust</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">D1 (truth)</div><div class="d">Our query runs — this is the answer key</div></div>
+      <div class="bstage"><div class="n">D1 (truth)</div><div class="d">Our query runs against the live DB — no stale fixtures</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">/api/ask (skipCache)</div><div class="d">Bypasses the cache, or it would test the cache not the model</div></div>
+      <div class="bstage"><div class="n">/api/ask (skipCache)</div><div class="d">Bypasses <b>both</b> caches, or it would test the cache not the model</div></div>
       <span class="arrow">→</span>
-      <div class="bstage"><div class="n">compare RESULTS</div><div class="d">Not SQL text — many correct queries exist. 26/26 today</div></div>
+      <div class="bstage"><div class="n">compare RESULTS</div><div class="d">Not SQL text — many correct queries exist for one question</div></div>
     </div>
   </div>
 
@@ -248,45 +283,58 @@
 
     <div class="box">
       <h3>What each Cloudflare product does here</h3>
-      <div class="kv"><span class="k">Workers</span><span class="v">Runs all the code — routing, validation, the page itself</span></div>
-      <div class="kv"><span class="k">Workers AI</span><span class="v">The two model calls, on the same platform</span></div>
-      <div class="kv"><span class="k">D1</span><span class="v">The database. seasons (23) · games (1,982) · data_provenance</span></div>
-      <div class="kv"><span class="k">Cron Triggers</span><span class="v">Wakes the Worker nightly — the data keeps itself current</span></div>
-      <div class="kv"><span class="k">DNS + custom domain</span><span class="v">Puts it on chalk.jermainebethune.com</span></div>
-      <div class="kv"><span class="k">Turnstile</span><span class="v">Proves a human asked — once per visit (2h session)</span></div>
+      <div class="kv"><span class="k">Workers</span><span class="v">Runs all the code — routing, validation, the page, the MCP server</span></div>
+      <div class="kv"><span class="k">Workers AI</span><span class="v">Two model calls, plus the embedding</span></div>
+      <div class="kv"><span class="k">D1</span><span class="v">seasons · games (1,982) · provenance · ingest_runs</span></div>
+      <div class="kv new"><span class="k">Vectorize</span><span class="v">Semantic cache of question → SQL, 1024d</span></div>
+      <div class="kv new"><span class="k">Durable Objects</span><span class="v">MCP sessions, and the rate-limit counter</span></div>
+      <div class="kv"><span class="k">Turnstile</span><span class="v">Proves a human asked — one challenge per visit</span></div>
       <div class="kv"><span class="k">AI Gateway</span><span class="v">Caches, logs and meters every inference</span></div>
-      <div class="kv"><span class="k">deploy.sh</span><span class="v">Emails on deploy — no native Worker alert exists</span></div>
+      <div class="kv"><span class="k">Access</span><span class="v">Guards the ops dashboard, JWT verified in-Worker</span></div>
       <div class="kv"><span class="k">Static assets</span><span class="v">Serves the photographs from ./public</span></div>
-      <div class="kv"><span class="k">Observability</span><span class="v">Logs and the GraphQL usage metrics</span></div>
     </div>
 
     <div class="box">
-      <h3>Measured cost per question</h3>
-      <div class="kv"><span class="k">qwen2.5-coder-32b</span><span class="v"><b>33.2</b> Neurons — writes SQL, 94% of spend</span></div>
-      <div class="kv"><span class="k">llama-4-scout-17b</span><span class="v">writes prose, streamed — a rounding error next to the SQL call</span></div>
-      <div class="kv"><span class="k">total, cold</span><span class="v"><b>~36</b> Neurons · answer starts &lt;1s</span></div>
-      <div class="kv"><span class="k">repeat question</span><span class="v"><b>0</b> Neurons · ~0.4s (gateway cache)</span></div>
-      <div class="kv"><span class="k">free allowance</span><span class="v"><b>10,000</b>/day — repeats are free</span></div>
+      <h3>Where the cost actually goes</h3>
+      <div class="kv"><span class="k">writes SQL</span><span class="v"><b>77%</b> of a measured day's Neurons</span></div>
+      <div class="kv"><span class="k">writes prose</span><span class="v"><b>21%</b> — only runs when rows exist</span></div>
+      <div class="kv new"><span class="k">embedding</span><span class="v"><b>0.44</b> Neurons — <b>1/120th</b> of the SQL call</span></div>
+      <div class="kv"><span class="k">cache hit</span><span class="v">Skips the 77%. Still queries D1.</span></div>
+      <div class="kv"><span class="k">raw-data call</span><span class="v"><b>0</b> Neurons — one D1 read</span></div>
+      <div class="kv"><span class="k">free allowance</span><span class="v"><b>10,000</b>/day, resets 00:00 UTC</span></div>
+    </div>
+
+    <div class="box">
+      <h3>Why the cache is safe</h3>
+      <div class="kv"><span class="k">stores</span><span class="v">SQL, never the answer</span></div>
+      <div class="kv"><span class="k">because</span><span class="v">Data updates nightly — a cached <i>answer</i> becomes a confident lie</span></div>
+      <div class="kv"><span class="k">threshold</span><span class="v"><b>0.92</b> cosine, chosen by measurement</span></div>
+      <div class="kv"><span class="k">the finding</span><span class="v">The loosest paraphrase (<b>0.863</b>) scores <i>below</i> every near-miss (<b>0.878–0.896</b>) — the classes overlap, so no cutoff catches them all</span></div>
+      <div class="kv"><span class="k">so</span><span class="v">Tuned to prefer a miss. A miss costs Neurons; a bad hit costs correctness.</span></div>
+      <div class="kv"><span class="k">never cached</span><span class="v">Follow-ups · "this season" · refusals · queries D1 rejected</span></div>
     </div>
 
     <div class="box">
       <h3>Reading the colours</h3>
       <div class="legend">
-        <span class="lk"><span class="dot" style="background: var(--ai)"></span> Model involved — output untrusted</span>
-        <span class="lk"><span class="dot" style="background: var(--data)"></span> Ground truth — numbers originate</span>
-        <span class="lk"><span class="dot" style="background: var(--edge)"></span> Platform — Worker, routing</span>
+        <span class="lk"><span class="dot" style="background: var(--ai)"></span> Model involved — output untrusted until validated</span>
+        <span class="lk"><span class="dot" style="background: var(--data)"></span> Ground truth — numbers originate, or SQL is replayed into it</span>
+        <span class="lk"><span class="dot" style="background: var(--edge)"></span> Platform — Worker, routing, client</span>
         <span class="lk"><span class="dot" style="background: var(--stop)"></span> Refusal — stops rather than guesses</span>
+      </div>
+      <div style="font-size:10px; color:var(--soft); margin-top:9px; border-top:1px solid var(--sunk); padding-top:8px;">
+        <b>The cache is teal, not orange.</b> It stores a statement, not a sentence — so a hit never puts model output in front of a reader. D1 re-runs it either way.
       </div>
     </div>
 
   </div>
 
   <div class="thesis">
-    <p class="t1">Grounding a model in a datastore prevents invented numbers. It does not prevent a wrong query from producing a confidently wrong answer.</p>
-    <p class="t2">"How many MVPs?" once returned <b>0</b> — an empty column answers. "Best 3-point season?" answered with overall FG% — a neighbouring column answers. "This past season?" queried 2022-23 — a stale sense of time answers. All real numbers, all confidently wrong; the fix each time was taking the decision away from the model. That is why five of the seven steps can refuse.</p>
+    <p class="t1">Grounding a model in a datastore prevents invented numbers. It does not prevent a wrong query from producing a confidently wrong answer — which is why the validator, not the model, is the load-bearing part.</p>
+    <p class="t2">"How many MVPs did he win?" once returned <b>0</b> — the awards column existed but was empty, so the query succeeded and produced a real, meaningless figure. An empty column is more dangerous than a missing one, because an empty column answers. That guard was written to contain <i>our own</i> model. It turned out to contain anyone's — which is the only reason a public endpoint that runs caller-written SQL is a reasonable thing to publish rather than a reckless one.</p>
   </div>
 
-  <div class="foot">chalk.jermainebethune.com · github.com/jermainebethune/lebron-chalk-toss · cost measured via GraphQL aiInferenceAdaptiveGroups</div>
+  <div class="foot">chalk.jermainebethune.com · chalk-toss.jermaine-e7a.workers.dev/mcp · github.com/jermainebethune/lebron-chalk-toss · cost measured via GraphQL aiInferenceAdaptiveGroups</div>
 
 </body>
 </html>
