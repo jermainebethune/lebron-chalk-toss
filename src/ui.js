@@ -201,6 +201,11 @@ export const page = `<!doctype html>
     font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; margin: 0;
     text-wrap: pretty;
   }
+  /* Headline type is for headline-length answers. A long answer set at that
+     size reads as shouting — step it down once it stops being a one-liner. */
+  .answer .text.long {
+    font-size: clamp(1.05rem, 2.2vw, 1.4rem); line-height: 1.4; font-weight: 500;
+  }
   .error .text, .wait .text { margin: 0; color: var(--chalk-mid); }
 
   /* A caret marks the answer as still arriving. The global reduced-motion rule
@@ -579,9 +584,12 @@ function chartOf(rows) {
   const values = rows.map(r => pct ? r[valueCol] * 100 : r[valueCol]);
   if (values.some(v => v < 0)) return '';
 
-  // A line implies order. Rows ranked by the SQL (top seasons by ppg) must be
-  // bars — a line over a ranked axis would draw a fake trend.
-  const chrono = (labelCol === 'season' || labelCol === 'date') &&
+  // A line implies continuity. Seasons are a uniform yearly series, so a career
+  // arc earns one. Game dates do not — a game log is discrete events scattered
+  // unevenly through time (and the x spacing here is by index, not by date), so
+  // connecting them draws a trend that isn't there. Games get bars. Rows ranked
+  // by the SQL (top seasons by ppg) also get bars for the same reason.
+  const chrono = labelCol === 'season' &&
     labels.every((l, i) => !i || l >= labels[i - 1]);
   const form = chrono && labels.length >= 8 ? 'line' : 'bars';
 
@@ -748,7 +756,9 @@ function errorHtml(data) {
 }
 
 function resultHtml(data) {
-  let html = slab('answer', 'Answer', '<p class="text">' + esc(data.answer || '') + '</p>');
+  const answer = data.answer || '';
+  let html = slab('answer', 'Answer',
+    '<p class="text' + (answer.length > 180 ? ' long' : '') + '">' + esc(answer) + '</p>');
   if (data.sql) {
     html += slab('query', 'The query the model wrote', '<pre>' + esc(data.sql) + '</pre>');
     html += chartOf(data.rows);
@@ -796,6 +806,7 @@ async function ask(question) {
       if (!answerEl) return;
       answerText += ev.text;
       answerEl.textContent = answerText.replace(/^\\s+/, '');
+      if (answerText.length > 180) answerEl.classList.add('long');
     } else if (ev.type === 'result') {
       showCredit(ev.provenance);
       sql = ev.sql;

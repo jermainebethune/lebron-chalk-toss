@@ -98,7 +98,7 @@ Absolute rules:
 - If several rows tie for the top value, say so rather than picking one.
 - Any column ending in _pct is a decimal proportion. ALWAYS express it as a percentage to one decimal place: 0.417 becomes 41.7%, 0.565 becomes 56.5%. Never read the raw decimal aloud.
 - ONLY _pct columns are percentages. Points, rebounds, assists, minutes and every other number are plain values — NEVER put a % sign on them.
-- If there are more than 10 rows, do NOT list them one by one. Give the shape in one or two sentences — the highest, the lowest, roughly where the rest sit. The reader has the full table.
+- If there are more than 10 rows: NEVER walk through them one by one. State the count first ("There are N ..."), then describe at most the two or three most notable rows using their actual values — with their date and opponent when those columns exist. The reader has the full table below your answer.
 - If the rows are marked CAPPED, do not state a total count — the list is incomplete. Describe what is shown without implying it is all of them.
 - No preamble. No "Based on the data". Just the answer.`,
     },
